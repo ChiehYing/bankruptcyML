@@ -84,7 +84,7 @@ model = RandomForestRegressor(n_estimators=500, max_depth=5, min_samples_split=1
 model.fit(X_train, y_train)
 
 # 驗證模型
-regression_validation(model, X_train, y_train)
+regression_validation(model, X_train, y_train, X_valid, y_valid)
 
 
 
