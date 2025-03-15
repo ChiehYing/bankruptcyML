@@ -7,13 +7,15 @@ from sklearn.feature_selection import RFE
 from sklearn.decomposition import PCA
 from auto_preprocess import AutoPreprocess
 from regression_model_valid import regression_validation
+from feature_select import feature_selection
+
 
 # 設定分析資料
-data = pd.read_csv("../data/train_data_0313.csv")
+data = pd.read_csv("data/train_data_0313.csv")
 data = data.dropna(subset=["Bankrupt?"])
 
 # 設定驗證資料
-data_val = pd.read_csv("../data/test_data_0313.csv")
+data_val = pd.read_csv("data/test_data_0313.csv")
 data_val = data_val.dropna(subset=["Bankrupt?"])
 
 # 資料預處理
@@ -67,24 +69,41 @@ ap.fit(data,
        "Degree of Financial Leverage (DFL)",
        "Interest Coverage Ratio (Interest expense to EBIT)", "Net Income Flag",
        "Equity to Liability"])
-ap.save("../preprocess_log/preprocess.bin")
+ap.save("preprocess_log/preprocess.bin")
 
 # 設定預測目標
 X_train = ap.transform(data)
 y_train = data["Bankrupt?"]
 
 # 設定驗證資料
-ap_fitted = AutoPreprocess.load("../preprocess_log/preprocess.bin")
+ap_fitted = AutoPreprocess.load("preprocess_log/preprocess.bin")
 ap_fitted.transform(data_val)
 X_valid = ap.transform(data_val)
 y_valid = data_val["Bankrupt?"]
 
-# 定義與訓練模型
-model = RandomForestRegressor(n_estimators=500, max_depth=5, min_samples_split=10, min_samples_leaf=4, max_features=0.3)
-model.fit(X_train, y_train)
+# 特徵篩選
+x_train, feature_result = feature_selection(
+       X_train, 
+       y_train, 
+       variance_threshold=0.01, 
+       correlation_threshold=0.8, 
+       show_plots=True
+) 
 
-# 驗證模型
-regression_validation(model, X_train, y_train, X_valid, y_valid)
+print(feature_result)
+
+# # 定義與訓練模型
+# model = RandomForestRegressor(
+#        n_estimators=500, 
+#        max_depth=5, 
+#        min_samples_split=10, 
+#        min_samples_leaf=4, 
+#        max_features=0.3
+# )
+# model.fit(X_train, y_train)
+
+# # 驗證模型
+# regression_validation(model, X_train, y_train, X_valid, y_valid)
 
 
 
