@@ -495,7 +495,7 @@ def plot_heatmap(results_df, metrics, show_avg_performance=True, return_fig=Fals
     plt.tight_layout()
     
     heatmap_fig = fig if return_fig else None
-    
+
     if not return_fig:
         plt.show()
     
@@ -519,7 +519,11 @@ def plot_heatmap(results_df, metrics, show_avg_performance=True, return_fig=Fals
         if not return_fig:
             plt.show()
     
-    return heatmap_fig if return_fig else None
+    # 返回兩個圖形對象
+    if return_fig:
+        return (heatmap_fig, avg_fig)
+    return None
+
 
 
 # 統一視覺化函數
@@ -577,12 +581,30 @@ def plot_model_results(results_df, task_type="classification", is_tuned=False, s
     
     # 繪製熱圖比較
     if metric_groups["train_metrics"]:
-        fig = plot_heatmap(cleaned_df, metric_groups["train_metrics"], show_avg_performance=show_avg_performance, return_fig=True)
-        if save_figures and fig:
-            fig_path = os.path.join(figure_dir, f"{prefix}heatmap_{timestamp}.png")
-            fig.savefig(fig_path, dpi=300, bbox_inches='tight')
-            print(f"圖表已保存至: {fig_path}")
-        plt.show()
+        figs = plot_heatmap(cleaned_df, metric_groups["train_metrics"], show_avg_performance=show_avg_performance, return_fig=True)
+        
+        if save_figures and figs:
+            heatmap_fig, avg_fig = figs
+            
+            # 儲存熱力圖
+            if heatmap_fig:
+                fig_path = os.path.join(figure_dir, f"{prefix}heatmap_{timestamp}.png")
+                heatmap_fig.savefig(fig_path, dpi=300, bbox_inches='tight')
+                print(f"熱力圖已保存至: {fig_path}")
+            
+            # 儲存性能排名圖
+            if avg_fig:
+                fig_path = os.path.join(figure_dir, f"{prefix}performance_ranking_{timestamp}.png")
+                avg_fig.savefig(fig_path, dpi=300, bbox_inches='tight')
+                print(f"性能排名圖已保存至: {fig_path}")
+        
+        # 顯示圖表
+        if isinstance(figs, tuple) and figs[0]:
+            plt.figure(figs[0].number)
+            plt.show()
+        if isinstance(figs, tuple) and figs[1]:
+            plt.figure(figs[1].number)
+            plt.show()
     
     # 繪製每個模型的詳細曲線圖
     for name, row in cleaned_df.iterrows():
