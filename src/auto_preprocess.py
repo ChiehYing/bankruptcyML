@@ -20,7 +20,7 @@ class AutoPreprocess:
             #自動補空值
             if (data[fname].dtype == object) or (data[fname].dtype == str): #字串型態欄位
                 self.fillna_value[fname] = data[fname].mode()[0] #補眾數
-                # self.fillna_value[fname] = 'np.nan'
+                # self.fillna_value[fname] = "np.nan"
                 # self.fillna_value[fname] = np.nan # 維持空值
             elif data[fname].dtype == bool: #布林型態
                 self.fillna_value[fname] = data[fname].mode()[0] #補眾數
@@ -50,7 +50,7 @@ class AutoPreprocess:
                 self.onehotencode_value[fname] = field_value
                 for value in field_value:
                     fn = fname+"_"+value
-                    # data[fn] = (data[fname] == value).astype('int8')
+                    # data[fn] = (data[fname] == value).astype("int8")
                     self.final_field_names.append(fn)
             elif data[fname].dtype == bool: #布林型態 轉成0跟1
                 # data[fname] = data[fname].astype(int)
@@ -89,7 +89,7 @@ class AutoPreprocess:
                     field_value = self.onehotencode_value[fname]
                 for value in field_value:
                     fn = fname+"_"+value
-                    data[fn] = (data[fname] == value).astype('int8')
+                    data[fn] = (data[fname] == value).astype("int8")
             elif data[fname].dtype == bool: #布林型態 轉成0跟1
                 data[fname] = data[fname].astype(int)
             else: # 數字型態 不用重新編碼

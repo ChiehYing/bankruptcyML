@@ -1,14 +1,18 @@
 import pandas as pd 
 import numpy as np   
 import pickle        
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.feature_selection import RFE
-from sklearn.decomposition import PCA
+from sklearn.linear_model import LinearRegression
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.neural_network import MLPRegressor
+from xgboost import XGBRegressor
+from lightgbm import LGBMRegressor
+from catboost import CatBoostRegressor
 from auto_preprocess import AutoPreprocess
 from regression_model_valid import regression_validation
 from feature_select import feature_selection
-
+from multi_model_evaluate import compare_models, tune_models, find_best_model
 
 # 設定分析資料
 data = pd.read_csv("data/train_data_0313.csv")
@@ -78,8 +82,8 @@ y_train = data["Bankrupt?"]
 # 設定驗證資料
 ap_fitted = AutoPreprocess.load("preprocess_log/preprocess.bin")
 ap_fitted.transform(data_val)
-X_valid = ap.transform(data_val)
-y_valid = data_val["Bankrupt?"]
+X_test = ap.transform(data_val)
+y_test = data_val["Bankrupt?"]
 
 # 特徵篩選
 x_train, feature_result = feature_selection(
@@ -87,10 +91,32 @@ x_train, feature_result = feature_selection(
        y_train, 
        variance_threshold=0.01, 
        correlation_threshold=0.8, 
-       show_plots=True
+       show_plots=False
 ) 
 
-print(feature_result)
+# 將選取的特徵儲存
+feature_culumns = pd.Series(feature_result["kept_features"])
+feature_culumns.to_csv("preprocess_log/selected_features.csv", encoding="utf-8")
+
+# 選擇模型
+models = {
+    "LinearRegression": LinearRegression(),
+    "SVR": SVR(kernel="rbf"),  
+    "DecisionTreeRegressor": DecisionTreeRegressor(max_depth=5),
+    "RandomForestRegressor": RandomForestRegressor(n_estimators=100),
+    "GradientBoostingRegressor": GradientBoostingRegressor(n_estimators=100),
+    "XGBRegressor": XGBRegressor(n_estimators=100),
+    "LGBMRegressor": LGBMRegressor(n_estimators=100),
+    "CatBoostRegressor": CatBoostRegressor(iterations=100, verbose=False),
+    "MLPRegressor": MLPRegressor(hidden_layer_sizes=(100,), max_iter=1000)
+}
+
+model_result = compare_models(models, x_train, y_train, task_type="prob_classification", threshold=None, save_figures=True)
+
+model_result.to_csv("data/model_result.csv", encoding="utf-8")
+
+find_best_model(model_result, task_type="prob_classification")
+
 
 # # 定義與訓練模型
 # model = RandomForestRegressor(

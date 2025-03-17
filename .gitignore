@@ -1,2 +1,5 @@
-myenv/
 __pycache__/
+venv_bankruptcy/
+picture/
+catboost_info/
+test/

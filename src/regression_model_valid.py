@@ -17,9 +17,9 @@ def regression_validation(model, X_train, y_train, X_valid=None, y_valid=None, p
     
     # 返回指標的字典，以便進一步使用
     if valid_metrics is not None:
-        return {'train': train_metrics, 'valid': valid_metrics}
+        return {"train": train_metrics, "valid": valid_metrics}
     else:
-        return {'train': train_metrics}
+        return {"train": train_metrics}
 
 # 驗證模型
 def model_validation(model, X_train, y_train, X_valid=None, y_valid=None):
@@ -48,26 +48,26 @@ def calculate_regression_metrics(y_true, y_pred):
     metrics = {}
     
     # R平方 (決定係數)
-    metrics['R2'] = r2_score(y_true, y_pred)
+    metrics["R2"] = r2_score(y_true, y_pred)
     
     # 平均絕對誤差 (MAE)
-    metrics['MAE'] = mean_absolute_error(y_true, y_pred)
+    metrics["MAE"] = mean_absolute_error(y_true, y_pred)
     
     # 均方誤差 (MSE)
-    metrics['MSE'] = mean_squared_error(y_true, y_pred)
+    metrics["MSE"] = mean_squared_error(y_true, y_pred)
     
     # 均方根誤差 (RMSE)
-    metrics['RMSE'] = np.sqrt(metrics['MSE'])
+    metrics["RMSE"] = np.sqrt(metrics["MSE"])
     
     # 解釋方差分數
-    metrics['Explained_Variance'] = explained_variance_score(y_true, y_pred)
+    metrics["Explained_Variance"] = explained_variance_score(y_true, y_pred)
     
     # 平均絕對百分比誤差 (MAPE)
     # 避免除以零，加入小數值
-    metrics['MAPE'] = np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + 1e-10))) * 100
+    metrics["MAPE"] = np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + 1e-10))) * 100
     
     # 最大誤差
-    metrics['Max_Error'] = np.max(np.abs(y_true - y_pred))
+    metrics["Max_Error"] = np.max(np.abs(y_true - y_pred))
     
     return metrics
 
@@ -94,7 +94,7 @@ def scatter_plot(y1_true, y1_pred, y2_true=None, y2_pred=None):
         # 添加理想線
         min_val = min(min(y1_true), min(y1_pred))
         max_val = max(max(y1_true), max(y1_pred))
-        axs[0].plot([min_val, max_val], [min_val, max_val], 'k--')
+        axs[0].plot([min_val, max_val], [min_val, max_val], "k--")
         
         # 驗證集散布圖
         axs[1].scatter(y2_true, y2_pred, alpha=0.6, color="r")
@@ -104,7 +104,7 @@ def scatter_plot(y1_true, y1_pred, y2_true=None, y2_pred=None):
         # 添加理想線
         min_val = min(min(y2_true), min(y2_pred))
         max_val = max(max(y2_true), max(y2_pred))
-        axs[1].plot([min_val, max_val], [min_val, max_val], 'k--')
+        axs[1].plot([min_val, max_val], [min_val, max_val], "k--")
     else:
         plt.figure(figsize=(8, 6))
         plt.scatter(y1_true, y1_pred, alpha=0.6, color="b")
@@ -114,7 +114,7 @@ def scatter_plot(y1_true, y1_pred, y2_true=None, y2_pred=None):
         # 添加理想線
         min_val = min(min(y1_true), min(y1_pred))
         max_val = max(max(y1_true), max(y1_pred))
-        plt.plot([min_val, max_val], [min_val, max_val], 'k--')
+        plt.plot([min_val, max_val], [min_val, max_val], "k--")
     
     plt.tight_layout()
     plt.show()
@@ -127,7 +127,7 @@ def residual_plot(y1_true, y1_pred, y2_true=None, y2_pred=None):
         # 訓練集殘差圖
         residuals1 = y1_true - y1_pred
         axs[0].scatter(y1_pred, residuals1, alpha=0.6, color="b")
-        axs[0].axhline(y=0, color='k', linestyle='--')
+        axs[0].axhline(y=0, color="k", linestyle="--")
         axs[0].set_xlabel("Predicted Values")
         axs[0].set_ylabel("Residuals")
         axs[0].set_title("Training Set Residuals")
@@ -135,7 +135,7 @@ def residual_plot(y1_true, y1_pred, y2_true=None, y2_pred=None):
         # 驗證集殘差圖
         residuals2 = y2_true - y2_pred
         axs[1].scatter(y2_pred, residuals2, alpha=0.6, color="r")
-        axs[1].axhline(y=0, color='k', linestyle='--')
+        axs[1].axhline(y=0, color="k", linestyle="--")
         axs[1].set_xlabel("Predicted Values")
         axs[1].set_ylabel("Residuals")
         axs[1].set_title("Validation Set Residuals")
@@ -143,7 +143,7 @@ def residual_plot(y1_true, y1_pred, y2_true=None, y2_pred=None):
         plt.figure(figsize=(8, 6))
         residuals = y1_true - y1_pred
         plt.scatter(y1_pred, residuals, alpha=0.6, color="b")
-        plt.axhline(y=0, color='k', linestyle='--')
+        plt.axhline(y=0, color="k", linestyle="--")
         plt.xlabel("Predicted Values")
         plt.ylabel("Residuals")
         plt.title("Training Set Residuals")

@@ -9,12 +9,12 @@ from sklearn.preprocessing import StandardScaler
 # 進行特徵篩選，包括低方差特徵移除和高相關性特徵移除
 def feature_selection(X, y=None, variance_threshold=0.01, correlation_threshold=0.8, show_plots=True):
     results = {
-        'original_shape': X.shape,
-        'original_features': list(X.columns),
-        'low_variance_features': [],
-        'high_correlation_pairs': [],
-        'dropped_features': [],
-        'kept_features': []
+        "original_shape": X.shape,
+        "original_features": list(X.columns),
+        "low_variance_features": [],
+        "high_correlation_pairs": [],
+        "dropped_features": [],
+        "kept_features": []
     }
     
     # 1. 低方差特徵篩選
@@ -38,8 +38,8 @@ def feature_selection(X, y=None, variance_threshold=0.01, correlation_threshold=
     print(f"\n移除低方差特徵後的資料維度: {X_reduced.shape}")
     print(f"移除的特徵: {low_variance_features}")
     
-    results['low_variance_features'] = low_variance_features
-    results['after_variance_filtering_shape'] = X_reduced.shape
+    results["low_variance_features"] = low_variance_features
+    results["after_variance_filtering_shape"] = X_reduced.shape
     
     # 2. 高相關性特徵篩選
     print("\n\n=== 進行高相關性特徵篩選 ===\n")
@@ -51,7 +51,7 @@ def feature_selection(X, y=None, variance_threshold=0.01, correlation_threshold=
     if show_plots:
         plt.figure(figsize=(12, 10))
         mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
-        sns.heatmap(correlation_matrix, mask=mask, annot=True, cmap='coolwarm', 
+        sns.heatmap(correlation_matrix, mask=mask, annot=True, cmap="coolwarm", 
                     fmt=".2f", linewidths=0.5, vmin=0, vmax=1)
         plt.title("特徵相關性矩陣")
         plt.tight_layout()
@@ -71,7 +71,7 @@ def feature_selection(X, y=None, variance_threshold=0.01, correlation_threshold=
     for pair in high_corr_pairs:
         print(f"- {pair[0]} 和 {pair[1]}, 相關係數: {pair[2]:.4f}")
     
-    results['high_correlation_pairs'] = [(p[0], p[1], float(p[2])) for p in high_corr_pairs]
+    results["high_correlation_pairs"] = [(p[0], p[1], float(p[2])) for p in high_corr_pairs]
     
     # 若沒有提供目標變數，則根據特徵名稱或特徵方差選擇
     features_to_drop = set()
@@ -124,14 +124,14 @@ def feature_selection(X, y=None, variance_threshold=0.01, correlation_threshold=
     # 視覺化最終相關性矩陣
     if show_plots and X_final.shape[1] > 1:
         plt.figure(figsize=(10, 8))
-        sns.heatmap(X_final.corr().abs(), annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+        sns.heatmap(X_final.corr().abs(), annot=True, cmap="coolwarm", fmt=".2f", linewidths=0.5)
         plt.title("篩選後特徵集的相關性矩陣")
         plt.tight_layout()
         plt.show()
     
     # 更新結果
-    results['final_shape'] = X_final.shape
-    results['kept_features'] = list(X_final.columns)
-    results['dropped_features'] = all_dropped
+    results["final_shape"] = X_final.shape
+    results["kept_features"] = list(X_final.columns)
+    results["dropped_features"] = all_dropped
     
     return X_final, results
