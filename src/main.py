@@ -111,11 +111,15 @@ models = {
     "MLPRegressor": MLPRegressor(hidden_layer_sizes=(100,), max_iter=1000)
 }
 
+# 模型比較
 model_result = compare_models(models, x_train, y_train, task_type="prob_classification", threshold=None, save_figures=True)
 
+# 儲存模型比較結果
 model_result.to_csv("data/model_result.csv", encoding="utf-8")
 
+# 找出分數最高的模型
 find_best_model(model_result, task_type="prob_classification")
+
 
 
 # # 定義與訓練模型
@@ -130,8 +134,6 @@ find_best_model(model_result, task_type="prob_classification")
 
 # # 驗證模型
 # regression_validation(model, X_train, y_train, X_valid, y_valid)
-
-
 
 
 # # 使用RFE進行特徵選擇
