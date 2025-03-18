@@ -1,23 +1,17 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from math import sqrt
 from time import time
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import roc_auc_score, balanced_accuracy_score
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import cross_validate, GridSearchCV
+from sklearn.model_selection import cross_validate, GridSearchCV, cross_val_predict
 from sklearn.metrics import log_loss, brier_score_loss, precision_recall_curve, auc, roc_curve
 from sklearn.calibration import calibration_curve
-import matplotlib.font_manager as fm
-import seaborn as sns
+from sklearn.base import clone
 import os
 from datetime import datetime
 from model_compare_plot import plot_model_results
-
-
-# 設定支援中文的字體（例如微軟正黑體）
-plt.rcParams["font.family"] = "Microsoft JhengHei"
 
 
 # 創建資料夾的輔助函數
@@ -62,7 +56,7 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
     pandas.DataFrame
         包含所有模型評估結果的DataFrame
     """
-    # 選擇評分指標 - 根據任務類型調整，確保回歸分類可用
+    # 選擇評分指標 - 根據任務類型調整
     if task_type == "classification":
         scoring = {
             "accuracy": "accuracy",
@@ -76,7 +70,6 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
         if len(np.unique(y_train)) == 2:
             # 預設評分不包含需要predict_proba的指標
             base_scoring = scoring.copy()
-            # 在迴圈中對每個模型單獨檢查是否可以添加
     elif task_type == "prob_classification":
         # 使用不依賴predict_proba的基本評分指標
         scoring = {
@@ -113,10 +106,6 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
             return_train_score=False
         )
         
-        # 在訓練集上擬合模型
-        model.fit(X_train, y_train)
-        y_train_pred = model.predict(X_train)
-        
         # 計算指標
         model_results = {}
         
@@ -129,6 +118,81 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
                 model_results[metric_name.replace("neg_", "")] = -np.mean(scores)
             else:
                 model_results[metric_name] = np.mean(scores)
+        
+        # 特別處理回歸分類任務的交叉驗證
+        if task_type == "prob_classification":
+            # 獲取交叉驗證預測值
+            cv_predictions = cross_val_predict(model, X_train, y_train, cv=cv)
+            
+            # 確保預測值在[0,1]範圍內
+            if np.any((cv_predictions < 0) | (cv_predictions > 1)):
+                print(f"警告: {name} 交叉驗證產生了超出[0,1]範圍的預測值")
+                cv_predictions_scaled = 1 / (1 + np.exp(-(cv_predictions * 4 - 2)))
+                print(f"已使用Sigmoid函數重新縮放預測值到[0,1]範圍")
+            else:
+                cv_predictions_scaled = cv_predictions
+                
+            # 閾值處理
+            if threshold is None:
+                # 尋找最佳閾值 (對於交叉驗證集)
+                thresholds = np.linspace(0.1, 0.9, 81)  # 從0.1到0.9，步長0.01
+                cv_f1_scores = []
+                
+                for thresh in thresholds:
+                    y_binary = (cv_predictions_scaled >= thresh).astype(int)
+                    f1 = f1_score(y_train, y_binary, average=average)
+                    cv_f1_scores.append(f1)
+                
+                # 找出最大F1分數對應的閾值
+                best_idx = np.argmax(cv_f1_scores)
+                cv_best_threshold = thresholds[best_idx]
+                
+                # 記錄交叉驗證的最佳閾值
+                model_results["cv_threshold"] = cv_best_threshold
+                model_results["cv_threshold_f1"] = cv_f1_scores[best_idx]
+                print(f"{name}的交叉驗證最佳閾值: {cv_best_threshold:.3f}, F1: {cv_f1_scores[best_idx]:.3f}")
+                
+                # 使用最佳閾值進行二值化
+                cv_binary = (cv_predictions_scaled >= cv_best_threshold).astype(int)
+            else:
+                # 使用指定閾值
+                cv_binary = (cv_predictions_scaled >= threshold).astype(int)
+                model_results["cv_threshold"] = threshold
+            
+            # 計算交叉驗證分類指標
+            model_results["cv_accuracy"] = accuracy_score(y_train, cv_binary)
+            model_results["cv_precision"] = precision_score(y_train, cv_binary, average=average)
+            model_results["cv_recall"] = recall_score(y_train, cv_binary, average=average)
+            model_results["cv_f1"] = f1_score(y_train, cv_binary, average=average)
+            model_results["cv_balanced_acc"] = balanced_accuracy_score(y_train, cv_binary)
+            
+            # 計算交叉驗證的Brier分數和對數損失
+            model_results["cv_brier_score"] = brier_score_loss(y_train, cv_predictions_scaled)
+            model_results["cv_log_loss"] = log_loss(y_train, cv_predictions_scaled)
+            
+            # 計算交叉驗證的ROC AUC和PR AUC
+            model_results["cv_auc_roc"] = roc_auc_score(y_train, cv_predictions_scaled)
+            
+            precision_cv, recall_cv, _ = precision_recall_curve(y_train, cv_predictions_scaled)
+            model_results["cv_auc_pr"] = auc(recall_cv, precision_cv)
+            
+            # 保存交叉驗證曲線數據
+            fpr_cv, tpr_cv, _ = roc_curve(y_train, cv_predictions_scaled)
+            model_results["cv_curve_data"] = {
+                "roc": {
+                    "fpr": fpr_cv,
+                    "tpr": tpr_cv
+                },
+                "pr": {
+                    "precision": precision_cv,
+                    "recall": recall_cv
+                },
+                "y_pred": cv_predictions_scaled
+            }
+        
+        # 在訓練集上擬合模型
+        model.fit(X_train, y_train)
+        y_train_pred = model.predict(X_train)
         
         # 添加結果 - 根據任務類型分別處理
         if task_type == "classification":
@@ -195,7 +259,7 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
             if np.any((y_train_pred < 0) | (y_train_pred > 1)):
                 print(f"警告: {name} 產生了超出[0,1]範圍的預測值")
                 # 使用Sigmoid函數重新縮放，而非簡單裁剪
-                y_train_pred_scaled = 1 / (1 + np.exp(-(y_train_pred * 4 - 2)))  # 縮放因子4和偏移-2適用於大多數情況
+                y_train_pred_scaled = 1 / (1 + np.exp(-(y_train_pred * 4 - 2)))
                 print(f"已使用Sigmoid函數重新縮放預測值到[0,1]範圍")
             else:
                 y_train_pred_scaled = y_train_pred
@@ -216,16 +280,16 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
                 best_threshold = thresholds[best_idx]
                 
                 # 記錄最佳閾值
-                model_results["threshold"] = best_threshold
-                model_results["threshold_f1"] = f1_scores[best_idx]
-                print(f"{name}的最佳閾值: {best_threshold:.3f}, F1: {f1_scores[best_idx]:.3f}")
+                model_results["train_threshold"] = best_threshold
+                model_results["train_threshold_f1"] = f1_scores[best_idx]
+                print(f"{name}的訓練集最佳閾值: {best_threshold:.3f}, F1: {f1_scores[best_idx]:.3f}")
                 
                 # 使用最佳閾值計算分類指標
                 y_train_binary = (y_train_pred_scaled >= best_threshold).astype(int)
             else:
                 # 使用指定閾值
                 best_threshold = threshold
-                model_results["threshold"] = best_threshold
+                model_results["train_threshold"] = best_threshold
                 y_train_binary = (y_train_pred_scaled >= best_threshold).astype(int)
             
             # 計算基於閾值的分類指標
@@ -289,13 +353,17 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
             }
             
         else:  # regression
-            model_results["train_mse"] = mean_squared_error(y_train, y_train_pred)
-            model_results["train_rmse"] = sqrt(model_results["train_mse"])
-            model_results["train_mae"] = mean_absolute_error(y_train, y_train_pred)
-            model_results["train_r2"] = r2_score(y_train, y_train_pred)
+            if "model_results" not in locals() or name not in model_results:
+                model_results[name] = {}
+                
+            model_results[name]["train_time"] = time() - start_time
+            model_results[name]["train_mse"] = mean_squared_error(y_train, y_train_pred)
+            model_results[name]["train_rmse"] = sqrt(model_results[name]["train_mse"])
+            model_results[name]["train_mae"] = mean_absolute_error(y_train, y_train_pred)
+            model_results[name]["train_r2"] = r2_score(y_train, y_train_pred)
             
             # 儲存預測資料供視覺化使用
-            model_results["regression_data"] = {
+            model_results[name]["regression_data"] = {
                 "y_true": y_train,
                 "y_pred": y_train_pred
             }
@@ -369,7 +437,7 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
     
     # 調優結果
     tuned_models = {}
-    results_summary = {}
+    model_results = {}  # 修正：使用model_results而不是results_summary
     
     # 對每個模型進行調優
     for name, model in models.items():
@@ -398,38 +466,117 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
         # 進行參數搜索
         grid.fit(X_train, y_train)
         
-        # 獲取最佳模型
+        # 儲存調優後的模型
         best_model = grid.best_estimator_
-        y_train_pred = best_model.predict(X_train)
-        
-        # 創建結果摘要
-        model_results = {
+        tuned_models[name] = {
+            "model": best_model,
             "best_params": grid.best_params_,
-            "train_time": time() - start_time
+            "cv_score": grid.best_score_
         }
+        
+        # 特別處理回歸分類任務的交叉驗證
+        if task_type == "prob_classification":
+            # 獲取交叉驗證預測值
+            cv_predictions = cross_val_predict(best_model, X_train, y_train, cv=cv)
+            
+            # 確保預測值在[0,1]範圍內
+            if np.any((cv_predictions < 0) | (cv_predictions > 1)):
+                print(f"警告: {name} 交叉驗證產生了超出[0,1]範圍的預測值")
+                cv_predictions_scaled = 1 / (1 + np.exp(-(cv_predictions * 4 - 2)))
+                print(f"已使用Sigmoid函數重新縮放預測值到[0,1]範圍")
+            else:
+                cv_predictions_scaled = cv_predictions
+                
+            # 閾值處理
+            if threshold is None:
+                # 尋找最佳閾值 (對於交叉驗證集)
+                thresholds = np.linspace(0.1, 0.9, 81)  # 從0.1到0.9，步長0.01
+                cv_f1_scores = []
+                
+                for thresh in thresholds:
+                    y_binary = (cv_predictions_scaled >= thresh).astype(int)
+                    f1 = f1_score(y_train, y_binary, average=average)
+                    cv_f1_scores.append(f1)
+                
+                # 找出最大F1分數對應的閾值
+                best_idx = np.argmax(cv_f1_scores)
+                cv_best_threshold = thresholds[best_idx]
+                
+                # 初始化模型結果字典
+                model_results[name] = {
+                    "cv_threshold": cv_best_threshold,
+                    "cv_threshold_f1": cv_f1_scores[best_idx]
+                }
+                print(f"{name}的交叉驗證最佳閾值: {cv_best_threshold:.3f}, F1: {cv_f1_scores[best_idx]:.3f}")
+                
+                # 使用最佳閾值進行二值化
+                cv_binary = (cv_predictions_scaled >= cv_best_threshold).astype(int)
+            else:
+                # 使用指定閾值
+                cv_binary = (cv_predictions_scaled >= threshold).astype(int)
+                model_results[name] = {"cv_threshold": threshold}
+            
+            # 計算交叉驗證分類指標
+            model_results[name]["cv_accuracy"] = accuracy_score(y_train, cv_binary)
+            model_results[name]["cv_precision"] = precision_score(y_train, cv_binary, average=average)
+            model_results[name]["cv_recall"] = recall_score(y_train, cv_binary, average=average)
+            model_results[name]["cv_f1"] = f1_score(y_train, cv_binary, average=average)
+            model_results[name]["cv_balanced_acc"] = balanced_accuracy_score(y_train, cv_binary)
+            
+            # 計算交叉驗證的Brier分數和對數損失
+            model_results[name]["cv_brier_score"] = brier_score_loss(y_train, cv_predictions_scaled)
+            model_results[name]["cv_log_loss"] = log_loss(y_train, cv_predictions_scaled)
+            
+            # 計算交叉驗證的ROC AUC和PR AUC
+            model_results[name]["cv_auc_roc"] = roc_auc_score(y_train, cv_predictions_scaled)
+            
+            precision_cv, recall_cv, _ = precision_recall_curve(y_train, cv_predictions_scaled)
+            model_results[name]["cv_auc_pr"] = auc(recall_cv, precision_cv)
+            
+            # 保存交叉驗證曲線數據
+            fpr_cv, tpr_cv, _ = roc_curve(y_train, cv_predictions_scaled)
+            model_results[name]["cv_curve_data"] = {
+                "roc": {
+                    "fpr": fpr_cv,
+                    "tpr": tpr_cv
+                },
+                "pr": {
+                    "precision": precision_cv,
+                    "recall": recall_cv
+                },
+                "y_pred": cv_predictions_scaled
+            }
+        
+        # 在訓練集上評估
+        y_train_pred = best_model.predict(X_train)
         
         # 添加結果
         if task_type == "classification":
-            model_results["train_accuracy"] = accuracy_score(y_train, y_train_pred)
-            model_results["train_precision"] = precision_score(y_train, y_train_pred, average=average)
-            model_results["train_recall"] = recall_score(y_train, y_train_pred, average=average)
-            model_results["train_f1"] = f1_score(y_train, y_train_pred, average=average)
-            model_results["train_balanced_acc"] = balanced_accuracy_score(y_train, y_train_pred)
+            if name not in model_results:
+                model_results[name] = {}
+                
+            model_results[name]["best_params"] = grid.best_params_
+            model_results[name]["train_time"] = time() - start_time
+            model_results[name]["train_accuracy"] = accuracy_score(y_train, y_train_pred)
+            model_results[name]["train_precision"] = precision_score(y_train, y_train_pred, average=average)
+            model_results[name]["train_recall"] = recall_score(y_train, y_train_pred, average=average)
+            model_results[name]["train_f1"] = f1_score(y_train, y_train_pred, average=average)
+            model_results[name]["train_balanced_acc"] = balanced_accuracy_score(y_train, y_train_pred)
             
             # 對於二分類問題，添加AUC（如果模型支援）
             if len(np.unique(y_train)) == 2 and hasattr(best_model, "predict_proba"):
                 y_train_proba = best_model.predict_proba(X_train)[:, 1]
-                model_results["train_auc"] = roc_auc_score(y_train, y_train_proba)
+                model_results[name]["train_auc"] = roc_auc_score(y_train, y_train_proba)
                 
                 # 添加Brier分數
-                model_results["train_brier_score"] = brier_score_loss(y_train, y_train_proba)
+                model_results[name]["train_brier_score"] = brier_score_loss(y_train, y_train_proba)
                 
                 # 添加對數損失
-                model_results["train_log_loss"] = log_loss(y_train, y_train_proba)
+                model_results[name]["train_log_loss"] = log_loss(y_train, y_train_proba)
                 
                 # 計算校準圖
                 prob_true, prob_pred = calibration_curve(y_train, y_train_proba, n_bins=10)
-                model_results["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
+                model_results[name]["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
                 
                 # 計算期望校準誤差 (Expected Calibration Error)
                 bins = np.linspace(0, 1, 11)
@@ -448,10 +595,10 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                 # 計算ECE
                 weights = bin_counts / bin_counts.sum()
                 ece = np.sum(weights * np.abs(bin_props - bin_true_props))
-                model_results["train_ece"] = ece
+                model_results[name]["train_ece"] = ece
                 
                 # 儲存曲線資料供視覺化使用
-                model_results["curve_data"] = {
+                model_results[name]["curve_data"] = {
                     "roc": {
                         "fpr": roc_curve(y_train, y_train_proba)[0],
                         "tpr": roc_curve(y_train, y_train_proba)[1]
@@ -461,19 +608,24 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                         "prob_pred": prob_pred
                     }
                 }
-            
         elif task_type == "prob_classification":  # 回歸分類
+            if name not in model_results:
+                model_results[name] = {}
+                
+            model_results[name]["best_params"] = grid.best_params_
+            model_results[name]["train_time"] = time() - start_time
+            
             # 回歸評估指標
-            model_results["train_mse"] = mean_squared_error(y_train, y_train_pred)
-            model_results["train_rmse"] = sqrt(model_results["train_mse"])
-            model_results["train_mae"] = mean_absolute_error(y_train, y_train_pred)
-            model_results["train_r2"] = r2_score(y_train, y_train_pred)
+            model_results[name]["train_mse"] = mean_squared_error(y_train, y_train_pred)
+            model_results[name]["train_rmse"] = sqrt(model_results[name]["train_mse"])
+            model_results[name]["train_mae"] = mean_absolute_error(y_train, y_train_pred)
+            model_results[name]["train_r2"] = r2_score(y_train, y_train_pred)
             
             # 確保預測值在[0,1]範圍內
             if np.any((y_train_pred < 0) | (y_train_pred > 1)):
                 print(f"警告: {name} 產生了超出[0,1]範圍的預測值")
                 # 使用Sigmoid函數重新縮放，而非簡單裁剪
-                y_train_pred_scaled = 1 / (1 + np.exp(-(y_train_pred * 4 - 2)))  # 縮放因子4和偏移-2適用於大多數情況
+                y_train_pred_scaled = 1 / (1 + np.exp(-(y_train_pred * 4 - 2)))
                 print(f"已使用Sigmoid函數重新縮放預測值到[0,1]範圍")
             else:
                 y_train_pred_scaled = y_train_pred
@@ -494,40 +646,40 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                 best_threshold = thresholds[best_idx]
                 
                 # 記錄最佳閾值
-                model_results["threshold"] = best_threshold
-                model_results["threshold_f1"] = f1_scores[best_idx]
-                print(f"{name}的最佳閾值: {best_threshold:.3f}, F1: {f1_scores[best_idx]:.3f}")
+                model_results[name]["train_threshold"] = best_threshold
+                model_results[name]["train_threshold_f1"] = f1_scores[best_idx]
+                print(f"{name}的訓練集最佳閾值: {best_threshold:.3f}, F1: {f1_scores[best_idx]:.3f}")
                 
                 # 使用最佳閾值計算分類指標
                 y_train_binary = (y_train_pred_scaled >= best_threshold).astype(int)
             else:
                 # 使用指定閾值
                 best_threshold = threshold
-                model_results["threshold"] = best_threshold
+                model_results[name]["train_threshold"] = best_threshold
                 y_train_binary = (y_train_pred_scaled >= best_threshold).astype(int)
             
             # 計算基於閾值的分類指標
-            model_results["train_accuracy"] = accuracy_score(y_train, y_train_binary)
-            model_results["train_precision"] = precision_score(y_train, y_train_binary, average=average)
-            model_results["train_recall"] = recall_score(y_train, y_train_binary, average=average)
-            model_results["train_f1"] = f1_score(y_train, y_train_binary, average=average)
-            model_results["train_balanced_acc"] = balanced_accuracy_score(y_train, y_train_binary)
+            model_results[name]["train_accuracy"] = accuracy_score(y_train, y_train_binary)
+            model_results[name]["train_precision"] = precision_score(y_train, y_train_binary, average=average)
+            model_results[name]["train_recall"] = recall_score(y_train, y_train_binary, average=average)
+            model_results[name]["train_f1"] = f1_score(y_train, y_train_binary, average=average)
+            model_results[name]["train_balanced_acc"] = balanced_accuracy_score(y_train, y_train_binary)
             
             # 計算Brier分數（直接使用縮放後的預測值）
-            model_results["train_brier_score"] = brier_score_loss(y_train, y_train_pred_scaled)
+            model_results[name]["train_brier_score"] = brier_score_loss(y_train, y_train_pred_scaled)
             
             # 計算對數損失（使用縮放後的預測值）
-            model_results["train_log_loss"] = log_loss(y_train, y_train_pred_scaled)
+            model_results[name]["train_log_loss"] = log_loss(y_train, y_train_pred_scaled)
             
             # 計算ROC AUC和PR AUC（使用縮放後的預測值）
-            model_results["train_auc_roc"] = roc_auc_score(y_train, y_train_pred_scaled)
+            model_results[name]["train_auc_roc"] = roc_auc_score(y_train, y_train_pred_scaled)
             
             precision, recall, _ = precision_recall_curve(y_train, y_train_pred_scaled)
-            model_results["train_auc_pr"] = auc(recall, precision)
+            model_results[name]["train_auc_pr"] = auc(recall, precision)
             
             # 校準評估
             prob_true, prob_pred = calibration_curve(y_train, y_train_pred_scaled, n_bins=10)
-            model_results["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
+            model_results[name]["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
             
             # 計算期望校準誤差 (Expected Calibration Error)
             bins = np.linspace(0, 1, 11)  # 創建 11 個點，形成 10 個區間
@@ -546,11 +698,11 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
             # 計算ECE
             weights = bin_counts / bin_counts.sum()
             ece = np.sum(weights * np.abs(bin_props - bin_true_props))
-            model_results["train_ece"] = ece
+            model_results[name]["train_ece"] = ece
             
             # 儲存曲線資料供視覺化使用
             fpr, tpr, _ = roc_curve(y_train, y_train_pred_scaled)
-            model_results["curve_data"] = {
+            model_results[name]["curve_data"] = {
                 "roc": {
                     "fpr": fpr,
                     "tpr": tpr
@@ -565,29 +717,26 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                 },
                 "y_pred": y_train_pred_scaled
             }
-        
+            
         else:  # regression
-            model_results["train_mse"] = mean_squared_error(y_train, y_train_pred)
-            model_results["train_rmse"] = sqrt(model_results["train_mse"])
-            model_results["train_mae"] = mean_absolute_error(y_train, y_train_pred)
-            model_results["train_r2"] = r2_score(y_train, y_train_pred)
+            if name not in model_results:
+                model_results[name] = {}
+                
+            model_results[name]["best_params"] = grid.best_params_
+            model_results[name]["train_time"] = time() - start_time
+            model_results[name]["train_mse"] = mean_squared_error(y_train, y_train_pred)
+            model_results[name]["train_rmse"] = sqrt(model_results[name]["train_mse"])
+            model_results[name]["train_mae"] = mean_absolute_error(y_train, y_train_pred)
+            model_results[name]["train_r2"] = r2_score(y_train, y_train_pred)
             
             # 儲存預測資料供視覺化使用
-            model_results["regression_data"] = {
+            model_results[name]["regression_data"] = {
                 "y_true": y_train,
                 "y_pred": y_train_pred
             }
-        
-        # 儲存結果
-        tuned_models[name] = {
-            "model": best_model,
-            "best_params": grid.best_params_,
-            "cv_score": grid.best_score_
-        }
-        results_summary[name] = model_results
     
     # 創建結果摘要DataFrame
-    summary_df = pd.DataFrame(results_summary).T
+    summary_df = pd.DataFrame(model_results).T
     
     # 顯示結果
     print("\n調優後的模型比較:")
