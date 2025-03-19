@@ -22,9 +22,10 @@ def ensure_dir_exists(directory):
 
 
 # 模型比較
-def compare_models(models, X_train, y_train, task_type="classification", threshold=None, average="binary", cv=5, save_figures=False, figure_dir="picture"):
+def compare_models(models, X_train, y_train, X_val=None, y_val=None, task_type="classification", threshold=None, average="binary", cv=5, save_figures=False, figure_dir="picture"):
     """
-    比較多個機器學習模型的性能，使用交叉驗證和訓練集評估。
+    比較多個機器學習模型的性能，使用訓練集和驗證集評估。
+    若提供驗證集，則使用驗證集評估；否則使用交叉驗證結果作為驗證集。
     
     Parameters:
     -----------
@@ -34,6 +35,10 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
         訓練集特徵
     y_train : array-like
         訓練集標籤
+    X_val : array-like, optional (default=None)
+        驗證集特徵，如果提供則會評估驗證集性能
+    y_val : array-like, optional (default=None)
+        驗證集標籤，如果提供則會評估驗證集性能
     task_type : str, optional (default='classification')
         任務類型，可選值:
         - "classification": 標準分類問題評估
@@ -56,31 +61,33 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
     pandas.DataFrame
         包含所有模型評估結果的DataFrame
     """
+    # 檢查是否提供了驗證集
+    has_validation = X_val is not None and y_val is not None
+    
     # 選擇評分指標 - 根據任務類型調整
     if task_type == "classification":
         scoring = {
-            "accuracy": "accuracy",
-            "precision": "precision_weighted",
-            "recall": "recall_weighted",
-            "f1": "f1_weighted",
-            "balanced_acc": "balanced_accuracy"
+            "cv_accuracy": "accuracy",
+            "cv_precision": "precision_weighted",
+            "cv_recall": "recall_weighted",
+            "cv_f1": "f1_weighted",
+            "cv_balanced_acc": "balanced_accuracy"
         }
         
         # 檢查是否為二分類問題且可能使用predict_proba
         if len(np.unique(y_train)) == 2:
-            # 預設評分不包含需要predict_proba的指標
-            base_scoring = scoring.copy()
+            pass  # 不需要定義base_scoring
     elif task_type == "prob_classification":
         # 使用不依賴predict_proba的基本評分指標
         scoring = {
-            "mse": "neg_mean_squared_error", 
-            "r2": "r2"
+            "cv_mse": "neg_mean_squared_error", 
+            "cv_r2": "r2"
         }
     else:  # 回歸任務
         scoring = {
-            "mse": "neg_mean_squared_error",
-            "mae": "neg_mean_absolute_error",
-            "r2": "r2"
+            "cv_mse": "neg_mean_squared_error",
+            "cv_mae": "neg_mean_absolute_error",
+            "cv_r2": "r2"
         }
     
     # 評估結果
@@ -91,110 +98,118 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
         print(f"評估 {name}...")
         start_time = time()
         
-        # 根據模型類型調整評分指標
-        current_scoring = scoring.copy()
-        
-        # 如果是分類問題，且模型支援predict_proba，添加AUC評分
-        if task_type == "classification" and len(np.unique(y_train)) == 2:
-            if hasattr(model, "predict_proba"):
-                current_scoring["auc"] = "roc_auc"
-        
-        # 進行交叉驗證
-        cv_results = cross_validate(
-            model, X_train, y_train, 
-            scoring=current_scoring, cv=cv, 
-            return_train_score=False
-        )
-        
-        # 計算指標
+        # 初始化模型結果字典
         model_results = {}
         
-        # 記錄交叉驗證結果
-        for metric, scores in cv_results.items():
-            metric_name = metric.replace("test_", "")
+        # 如果沒有驗證集，則執行交叉驗證
+        if not has_validation:
+            # 根據模型類型調整評分指標
+            current_scoring = scoring.copy()
             
-            # 處理負值指標
-            if metric.startswith("test_neg_"):
-                model_results[metric_name.replace("neg_", "")] = -np.mean(scores)
-            else:
-                model_results[metric_name] = np.mean(scores)
-        
-        # 特別處理回歸分類任務的交叉驗證
-        if task_type == "prob_classification":
-            # 獲取交叉驗證預測值
-            cv_predictions = cross_val_predict(model, X_train, y_train, cv=cv)
+            # 如果是分類問題，且模型支援predict_proba，添加AUC評分
+            if task_type == "classification" and len(np.unique(y_train)) == 2:
+                if hasattr(model, "predict_proba"):
+                    current_scoring["cv_auc"] = "roc_auc"
             
-            # 確保預測值在[0,1]範圍內
-            if np.any((cv_predictions < 0) | (cv_predictions > 1)):
-                print(f"警告: {name} 交叉驗證產生了超出[0,1]範圍的預測值")
-                cv_predictions_scaled = 1 / (1 + np.exp(-(cv_predictions * 4 - 2)))
-                print(f"已使用Sigmoid函數重新縮放預測值到[0,1]範圍")
-            else:
-                cv_predictions_scaled = cv_predictions
+            # 進行交叉驗證
+            cv_results = cross_validate(
+                model, X_train, y_train, 
+                scoring=current_scoring, cv=cv, 
+                return_train_score=False
+            )
+            
+            # 記錄交叉驗證結果
+            for metric, scores in cv_results.items():
+                metric_name = metric.replace("test_", "")
                 
-            # 閾值處理
-            if threshold is None:
-                # 尋找最佳閾值 (對於交叉驗證集)
-                thresholds = np.linspace(0.1, 0.9, 81)  # 從0.1到0.9，步長0.01
-                cv_f1_scores = []
+                # 處理負值指標
+                if metric.startswith("test_neg_"):
+                    model_results[metric_name.replace("neg_", "")] = -np.mean(scores)
+                else:
+                    model_results[metric_name] = np.mean(scores)
+            
+            # 特別處理回歸分類任務的交叉驗證
+            if task_type == "prob_classification":
+                # 獲取交叉驗證預測值
+                cv_predictions = cross_val_predict(model, X_train, y_train, cv=cv)
                 
-                for thresh in thresholds:
-                    y_binary = (cv_predictions_scaled >= thresh).astype(int)
-                    f1 = f1_score(y_train, y_binary, average=average)
-                    cv_f1_scores.append(f1)
+                # 確保預測值在[0,1]範圍內
+                if np.any((cv_predictions < 0) | (cv_predictions > 1)):
+                    print(f"警告: {name} 交叉驗證產生了超出[0,1]範圍的預測值")
+                    cv_predictions_scaled = 1 / (1 + np.exp(-(cv_predictions * 4 - 2)))
+                    print(f"已使用Sigmoid函數重新縮放預測值到[0,1]範圍")
+                else:
+                    cv_predictions_scaled = cv_predictions
+                    
+                # 閾值處理
+                if threshold is None:
+                    # 尋找最佳閾值 (對於交叉驗證集)
+                    thresholds = np.linspace(0.1, 0.9, 81)  # 從0.1到0.9，步長0.01
+                    cv_f1_scores = []
+                    
+                    for thresh in thresholds:
+                        y_binary = (cv_predictions_scaled >= thresh).astype(int)
+                        f1 = f1_score(y_train, y_binary, average=average)
+                        cv_f1_scores.append(f1)
+                    
+                    # 找出最大F1分數對應的閾值
+                    best_idx = np.argmax(cv_f1_scores)
+                    cv_best_threshold = thresholds[best_idx]
+                    
+                    # 記錄交叉驗證的最佳閾值
+                    model_results["cv_threshold"] = cv_best_threshold
+                    model_results["cv_threshold_f1"] = cv_f1_scores[best_idx]
+                    print(f"{name}的交叉驗證最佳閾值: {cv_best_threshold:.3f}, F1: {cv_f1_scores[best_idx]:.3f}")
+                    
+                    # 使用最佳閾值進行二值化
+                    cv_binary = (cv_predictions_scaled >= cv_best_threshold).astype(int)
+                else:
+                    # 使用指定閾值
+                    cv_binary = (cv_predictions_scaled >= threshold).astype(int)
+                    model_results["cv_threshold"] = threshold
+                    
+                    # 記錄閾值對應的F1分數 (新增)
+                    cv_threshold_f1 = f1_score(y_train, cv_binary, average=average)
+                    model_results["cv_threshold_f1"] = cv_threshold_f1
+                    print(f"{name}使用指定閾值: {threshold:.3f}, F1: {cv_threshold_f1:.3f}")
                 
-                # 找出最大F1分數對應的閾值
-                best_idx = np.argmax(cv_f1_scores)
-                cv_best_threshold = thresholds[best_idx]
+                # 計算交叉驗證分類指標
+                model_results["cv_accuracy"] = accuracy_score(y_train, cv_binary)
+                model_results["cv_precision"] = precision_score(y_train, cv_binary, average=average)
+                model_results["cv_recall"] = recall_score(y_train, cv_binary, average=average)
+                model_results["cv_f1"] = f1_score(y_train, cv_binary, average=average)
+                model_results["cv_balanced_acc"] = balanced_accuracy_score(y_train, cv_binary)
                 
-                # 記錄交叉驗證的最佳閾值
-                model_results["cv_threshold"] = cv_best_threshold
-                model_results["cv_threshold_f1"] = cv_f1_scores[best_idx]
-                print(f"{name}的交叉驗證最佳閾值: {cv_best_threshold:.3f}, F1: {cv_f1_scores[best_idx]:.3f}")
+                # 計算交叉驗證的Brier分數和對數損失
+                model_results["cv_brier_score"] = brier_score_loss(y_train, cv_predictions_scaled)
+                model_results["cv_log_loss"] = log_loss(y_train, cv_predictions_scaled)
                 
-                # 使用最佳閾值進行二值化
-                cv_binary = (cv_predictions_scaled >= cv_best_threshold).astype(int)
-            else:
-                # 使用指定閾值
-                cv_binary = (cv_predictions_scaled >= threshold).astype(int)
-                model_results["cv_threshold"] = threshold
-            
-            # 計算交叉驗證分類指標
-            model_results["cv_accuracy"] = accuracy_score(y_train, cv_binary)
-            model_results["cv_precision"] = precision_score(y_train, cv_binary, average=average)
-            model_results["cv_recall"] = recall_score(y_train, cv_binary, average=average)
-            model_results["cv_f1"] = f1_score(y_train, cv_binary, average=average)
-            model_results["cv_balanced_acc"] = balanced_accuracy_score(y_train, cv_binary)
-            
-            # 計算交叉驗證的Brier分數和對數損失
-            model_results["cv_brier_score"] = brier_score_loss(y_train, cv_predictions_scaled)
-            model_results["cv_log_loss"] = log_loss(y_train, cv_predictions_scaled)
-            
-            # 計算交叉驗證的ROC AUC和PR AUC
-            model_results["cv_auc_roc"] = roc_auc_score(y_train, cv_predictions_scaled)
-            
-            precision_cv, recall_cv, _ = precision_recall_curve(y_train, cv_predictions_scaled)
-            model_results["cv_auc_pr"] = auc(recall_cv, precision_cv)
-            
-            # 保存交叉驗證曲線數據
-            fpr_cv, tpr_cv, _ = roc_curve(y_train, cv_predictions_scaled)
-            model_results["cv_curve_data"] = {
-                "roc": {
-                    "fpr": fpr_cv,
-                    "tpr": tpr_cv
-                },
-                "pr": {
-                    "precision": precision_cv,
-                    "recall": recall_cv
-                },
-                "y_pred": cv_predictions_scaled
-            }
+                # 計算交叉驗證的ROC AUC和PR AUC
+                model_results["cv_auc_roc"] = roc_auc_score(y_train, cv_predictions_scaled)
+                
+                precision_cv, recall_cv, _ = precision_recall_curve(y_train, cv_predictions_scaled)
+                model_results["cv_auc_pr"] = auc(recall_cv, precision_cv)
+                
+                # 保存交叉驗證曲線數據
+                fpr_cv, tpr_cv, _ = roc_curve(y_train, cv_predictions_scaled)
+                model_results["cv_curve_data"] = {
+                    "roc": {
+                        "fpr": fpr_cv,
+                        "tpr": tpr_cv
+                    },
+                    "pr": {
+                        "precision": precision_cv,
+                        "recall": recall_cv
+                    },
+                    "y_pred": cv_predictions_scaled,
+                    "y_true": y_train
+                }
         
         # 在訓練集上擬合模型
         model.fit(X_train, y_train)
         y_train_pred = model.predict(X_train)
         
-        # 添加結果 - 根據任務類型分別處理
+        # 添加訓練集結果 - 根據任務類型分別處理
         if task_type == "classification":
             model_results["train_accuracy"] = accuracy_score(y_train, y_train_pred)
             model_results["train_precision"] = precision_score(y_train, y_train_pred, average=average)
@@ -237,7 +252,7 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
                 model_results["train_ece"] = ece
                 
                 # 儲存曲線資料供視覺化使用
-                model_results["curve_data"] = {
+                model_results["train_curve_data"] = {
                     "roc": {
                         "fpr": roc_curve(y_train, y_train_proba)[0],
                         "tpr": roc_curve(y_train, y_train_proba)[1]
@@ -245,8 +260,62 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
                     "calibration": {
                         "prob_true": prob_true,
                         "prob_pred": prob_pred
-                    }
+                    },
+                    "y_pred": y_train_proba,
+                    "y_true": y_train
                 }
+                
+                # 如果提供了驗證集，評估驗證集性能
+                if has_validation:
+                    y_val_pred = model.predict(X_val)
+                    y_val_proba = model.predict_proba(X_val)[:, 1]
+                    
+                    # 添加驗證集評估指標
+                    model_results["val_accuracy"] = accuracy_score(y_val, y_val_pred)
+                    model_results["val_precision"] = precision_score(y_val, y_val_pred, average=average)
+                    model_results["val_recall"] = recall_score(y_val, y_val_pred, average=average)
+                    model_results["val_f1"] = f1_score(y_val, y_val_pred, average=average)
+                    model_results["val_balanced_acc"] = balanced_accuracy_score(y_val, y_val_pred)
+                    model_results["val_auc"] = roc_auc_score(y_val, y_val_proba)
+                    model_results["val_brier_score"] = brier_score_loss(y_val, y_val_proba)
+                    model_results["val_log_loss"] = log_loss(y_val, y_val_proba)
+                    
+                    # 計算驗證集校準圖
+                    val_prob_true, val_prob_pred = calibration_curve(y_val, y_val_proba, n_bins=10)
+                    model_results["val_calibration_slope"] = np.polyfit(val_prob_pred, val_prob_true, 1)[0]
+                    
+                    # 計算驗證集ECE
+                    val_binned = np.digitize(y_val_proba, bins) - 1
+                    val_bin_counts = np.bincount(val_binned, minlength=10)
+                    val_bin_sums = np.bincount(val_binned, weights=y_val_proba, minlength=10)
+                    val_bin_true = np.bincount(val_binned, weights=y_val.astype(float), minlength=10)
+                    
+                    # 避免除以零
+                    val_bin_props = np.zeros(10)
+                    val_mask = val_bin_counts > 0
+                    val_bin_props[val_mask] = val_bin_sums[val_mask] / val_bin_counts[val_mask]
+                    val_bin_true_props = np.zeros(10)
+                    val_bin_true_props[val_mask] = val_bin_true[val_mask] / val_bin_counts[val_mask]
+                    
+                    # 計算ECE
+                    val_weights = val_bin_counts / val_bin_counts.sum()
+                    val_ece = np.sum(val_weights * np.abs(val_bin_props - val_bin_true_props))
+                    model_results["val_ece"] = val_ece
+                    
+                    # 儲存驗證集曲線資料
+                    val_fpr, val_tpr, _ = roc_curve(y_val, y_val_proba)
+                    model_results["val_curve_data"] = {
+                        "roc": {
+                            "fpr": val_fpr,
+                            "tpr": val_tpr
+                        },
+                        "calibration": {
+                            "prob_true": val_prob_true,
+                            "prob_pred": val_prob_pred
+                        },
+                        "y_pred": y_val_proba,
+                        "y_true": y_val
+                    }
             
         elif task_type == "prob_classification":  # 回歸分類
             # 回歸評估指標
@@ -291,6 +360,11 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
                 best_threshold = threshold
                 model_results["train_threshold"] = best_threshold
                 y_train_binary = (y_train_pred_scaled >= best_threshold).astype(int)
+                
+                # 計算並記錄指定閾值的F1分數 (新增)
+                train_threshold_f1 = f1_score(y_train, y_train_binary, average=average)
+                model_results["train_threshold_f1"] = train_threshold_f1
+                print(f"{name}使用指定閾值: {threshold:.3f}, F1: {train_threshold_f1:.3f}")
             
             # 計算基於閾值的分類指標
             model_results["train_accuracy"] = accuracy_score(y_train, y_train_binary)
@@ -336,7 +410,7 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
             
             # 儲存曲線資料供視覺化使用
             fpr, tpr, _ = roc_curve(y_train, y_train_pred_scaled)
-            model_results["curve_data"] = {
+            model_results["train_curve_data"] = {
                 "roc": {
                     "fpr": fpr,
                     "tpr": tpr
@@ -349,24 +423,116 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
                     "prob_true": prob_true,
                     "prob_pred": prob_pred
                 },
-                "y_pred": y_train_pred_scaled
+                "y_pred": y_train_pred_scaled,
+                "y_true": y_train
             }
             
-        else:  # regression
-            if "model_results" not in locals() or name not in model_results:
-                model_results[name] = {}
+            # 如果提供了驗證集，評估驗證集性能
+            if has_validation:
+                y_val_pred = model.predict(X_val)
                 
-            model_results[name]["train_time"] = time() - start_time
-            model_results[name]["train_mse"] = mean_squared_error(y_train, y_train_pred)
-            model_results[name]["train_rmse"] = sqrt(model_results[name]["train_mse"])
-            model_results[name]["train_mae"] = mean_absolute_error(y_train, y_train_pred)
-            model_results[name]["train_r2"] = r2_score(y_train, y_train_pred)
+                # 驗證集回歸評估
+                model_results["val_mse"] = mean_squared_error(y_val, y_val_pred)
+                model_results["val_rmse"] = sqrt(model_results["val_mse"])
+                model_results["val_mae"] = mean_absolute_error(y_val, y_val_pred)
+                model_results["val_r2"] = r2_score(y_val, y_val_pred)
+                
+                # 確保預測值在[0,1]範圍內
+                if np.any((y_val_pred < 0) | (y_val_pred > 1)):
+                    print(f"警告: {name} 在驗證集產生了超出[0,1]範圍的預測值")
+                    y_val_pred_scaled = 1 / (1 + np.exp(-(y_val_pred * 4 - 2)))
+                    print(f"已使用Sigmoid函數重新縮放驗證集預測值到[0,1]範圍")
+                else:
+                    y_val_pred_scaled = y_val_pred
+                
+                # 使用訓練集的最佳閾值或指定閾值
+                used_threshold = model_results.get("train_threshold", best_threshold)
+                y_val_binary = (y_val_pred_scaled >= used_threshold).astype(int)
+                
+                # 記錄驗證集閾值評估
+                model_results["val_threshold"] = used_threshold
+                model_results["val_threshold_f1"] = f1_score(y_val, y_val_binary, average=average)
+                
+                # 驗證集分類評估
+                model_results["val_accuracy"] = accuracy_score(y_val, y_val_binary)
+                model_results["val_precision"] = precision_score(y_val, y_val_binary, average=average)
+                model_results["val_recall"] = recall_score(y_val, y_val_binary, average=average)
+                model_results["val_f1"] = f1_score(y_val, y_val_binary, average=average)
+                model_results["val_balanced_acc"] = balanced_accuracy_score(y_val, y_val_binary)
+                
+                # 驗證集概率評估
+                model_results["val_brier_score"] = brier_score_loss(y_val, y_val_pred_scaled)
+                model_results["val_log_loss"] = log_loss(y_val, y_val_pred_scaled)
+                model_results["val_auc_roc"] = roc_auc_score(y_val, y_val_pred_scaled)
+                
+                val_precision, val_recall, _ = precision_recall_curve(y_val, y_val_pred_scaled)
+                model_results["val_auc_pr"] = auc(val_recall, val_precision)
+                
+                # 驗證集校準評估
+                val_prob_true, val_prob_pred = calibration_curve(y_val, y_val_pred_scaled, n_bins=10)
+                model_results["val_calibration_slope"] = np.polyfit(val_prob_pred, val_prob_true, 1)[0]
+                
+                # 驗證集ECE計算
+                val_binned = np.clip(np.digitize(y_val_pred_scaled, bins) - 1, 0, 9)
+                val_bin_counts = np.bincount(val_binned, minlength=10)
+                val_bin_sums = np.bincount(val_binned, weights=y_val_pred_scaled, minlength=10)
+                val_bin_true = np.bincount(val_binned, weights=y_val.astype(float), minlength=10)
+                
+                val_bin_props = np.zeros(10)
+                val_mask = val_bin_counts > 0
+                val_bin_props[val_mask] = val_bin_sums[val_mask] / val_bin_counts[val_mask]
+                val_bin_true_props = np.zeros(10)
+                val_bin_true_props[val_mask] = val_bin_true[val_mask] / val_bin_counts[val_mask]
+                
+                val_weights = val_bin_counts / val_bin_counts.sum()
+                val_ece = np.sum(val_weights * np.abs(val_bin_props - val_bin_true_props))
+                model_results["val_ece"] = val_ece
+                
+                # 儲存驗證集曲線數據
+                val_fpr, val_tpr, _ = roc_curve(y_val, y_val_pred_scaled)
+                model_results["val_curve_data"] = {
+                    "roc": {
+                        "fpr": val_fpr,
+                        "tpr": val_tpr
+                    },
+                    "pr": {
+                        "precision": val_precision,
+                        "recall": val_recall
+                    },
+                    "calibration": {
+                        "prob_true": val_prob_true,
+                        "prob_pred": val_prob_pred
+                    },
+                    "y_pred": y_val_pred_scaled,
+                    "y_true": y_val
+                }
+            
+        else:  # regression
+            model_results["train_mse"] = mean_squared_error(y_train, y_train_pred)
+            model_results["train_rmse"] = sqrt(model_results["train_mse"])
+            model_results["train_mae"] = mean_absolute_error(y_train, y_train_pred)
+            model_results["train_r2"] = r2_score(y_train, y_train_pred)
             
             # 儲存預測資料供視覺化使用
-            model_results[name]["regression_data"] = {
+            model_results["train_regression_data"] = {
                 "y_true": y_train,
                 "y_pred": y_train_pred
             }
+            
+            # 如果提供了驗證集，評估驗證集性能
+            if has_validation:
+                y_val_pred = model.predict(X_val)
+                
+                model_results["val_mse"] = mean_squared_error(y_val, y_val_pred)
+                model_results["val_rmse"] = sqrt(model_results["val_mse"])
+                model_results["val_mae"] = mean_absolute_error(y_val, y_val_pred)
+                model_results["val_r2"] = r2_score(y_val, y_val_pred)
+                
+                # 儲存驗證集預測資料供視覺化使用
+                model_results["val_regression_data"] = {
+                    "y_true": y_val,
+                    "y_pred": y_val_pred
+                }
 
         # 添加訓練時間
         model_results["train_time"] = time() - start_time
@@ -387,10 +553,12 @@ def compare_models(models, X_train, y_train, task_type="classification", thresho
     return results_df
 
 
+
 # 模型參數調優
-def tune_models(models, X_train, y_train, param_grids, task_type="classification", threshold=None, average="binary", cv=5, save_figures=False, figure_dir="picture"):
+def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, task_type="classification", threshold=None, average="binary", cv=5, save_figures=False, figure_dir="picture"):
     """
     使用網格搜索對多個模型進行參數調優，並評估調優後模型的性能。
+    若提供驗證集，則使用驗證集評估；否則使用交叉驗證結果作為驗證集。
     
     Parameters:
     -----------
@@ -402,6 +570,10 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
         訓練集標籤
     param_grids : dict
         包含每個模型參數網格的字典，格式為 {模型名稱: 參數網格字典}
+    X_val : array-like, optional (default=None)
+        驗證集特徵，如果提供則會評估驗證集性能
+    y_val : array-like, optional (default=None)
+        驗證集標籤，如果提供則會評估驗證集性能
     task_type : str, optional (default='classification')
         任務類型，可選值:
         - "classification": 標準分類問題評估
@@ -426,6 +598,9 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
         - dict: 調優後的模型字典，包含最佳模型實例和參數
         - pandas.DataFrame: 調優後模型的評估結果摘要
     """
+    # 檢查是否提供了驗證集
+    has_validation = X_val is not None and y_val is not None
+    
     # 選擇主要評分標準
     if task_type == "classification":
         scoring = "f1_weighted"
@@ -437,7 +612,7 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
     
     # 調優結果
     tuned_models = {}
-    model_results = {}  # 修正：使用model_results而不是results_summary
+    model_results = {}
     
     # 對每個模型進行調優
     for name, model in models.items():
@@ -474,8 +649,14 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
             "cv_score": grid.best_score_
         }
         
-        # 特別處理回歸分類任務的交叉驗證
-        if task_type == "prob_classification":
+        # 確保模型結果字典已初始化
+        model_results[name] = {
+            "best_params": grid.best_params_,
+            "train_time": time() - start_time
+        }
+        
+        # 如果沒有驗證集，則執行交叉驗證評估
+        if not has_validation and task_type == "prob_classification":
             # 獲取交叉驗證預測值
             cv_predictions = cross_val_predict(best_model, X_train, y_train, cv=cv)
             
@@ -502,11 +683,9 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                 best_idx = np.argmax(cv_f1_scores)
                 cv_best_threshold = thresholds[best_idx]
                 
-                # 初始化模型結果字典
-                model_results[name] = {
-                    "cv_threshold": cv_best_threshold,
-                    "cv_threshold_f1": cv_f1_scores[best_idx]
-                }
+                # 記錄交叉驗證的最佳閾值
+                model_results[name]["cv_threshold"] = cv_best_threshold
+                model_results[name]["cv_threshold_f1"] = cv_f1_scores[best_idx]
                 print(f"{name}的交叉驗證最佳閾值: {cv_best_threshold:.3f}, F1: {cv_f1_scores[best_idx]:.3f}")
                 
                 # 使用最佳閾值進行二值化
@@ -514,7 +693,12 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
             else:
                 # 使用指定閾值
                 cv_binary = (cv_predictions_scaled >= threshold).astype(int)
-                model_results[name] = {"cv_threshold": threshold}
+                model_results[name]["cv_threshold"] = threshold
+                
+                # 記錄閾值對應的F1分數 (新增)
+                cv_threshold_f1 = f1_score(y_train, cv_binary, average=average)
+                model_results[name]["cv_threshold_f1"] = cv_threshold_f1
+                print(f"{name}使用指定閾值: {threshold:.3f}, F1: {cv_threshold_f1:.3f}")
             
             # 計算交叉驗證分類指標
             model_results[name]["cv_accuracy"] = accuracy_score(y_train, cv_binary)
@@ -544,19 +728,15 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                     "precision": precision_cv,
                     "recall": recall_cv
                 },
-                "y_pred": cv_predictions_scaled
+                "y_pred": cv_predictions_scaled,
+                "y_true": y_train
             }
         
         # 在訓練集上評估
         y_train_pred = best_model.predict(X_train)
         
-        # 添加結果
+        # 添加結果 - 根據任務類型分別處理
         if task_type == "classification":
-            if name not in model_results:
-                model_results[name] = {}
-                
-            model_results[name]["best_params"] = grid.best_params_
-            model_results[name]["train_time"] = time() - start_time
             model_results[name]["train_accuracy"] = accuracy_score(y_train, y_train_pred)
             model_results[name]["train_precision"] = precision_score(y_train, y_train_pred, average=average)
             model_results[name]["train_recall"] = recall_score(y_train, y_train_pred, average=average)
@@ -598,7 +778,7 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                 model_results[name]["train_ece"] = ece
                 
                 # 儲存曲線資料供視覺化使用
-                model_results[name]["curve_data"] = {
+                model_results[name]["train_curve_data"] = {
                     "roc": {
                         "fpr": roc_curve(y_train, y_train_proba)[0],
                         "tpr": roc_curve(y_train, y_train_proba)[1]
@@ -606,15 +786,64 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                     "calibration": {
                         "prob_true": prob_true,
                         "prob_pred": prob_pred
-                    }
+                    },
+                    "y_pred": y_train_proba,
+                    "y_true": y_train
                 }
-        elif task_type == "prob_classification":  # 回歸分類
-            if name not in model_results:
-                model_results[name] = {}
                 
-            model_results[name]["best_params"] = grid.best_params_
-            model_results[name]["train_time"] = time() - start_time
-            
+                # 如果提供了驗證集，評估驗證集性能
+                if has_validation:
+                    y_val_pred = best_model.predict(X_val)
+                    y_val_proba = best_model.predict_proba(X_val)[:, 1]
+                    
+                    # 添加驗證集評估指標
+                    model_results[name]["val_accuracy"] = accuracy_score(y_val, y_val_pred)
+                    model_results[name]["val_precision"] = precision_score(y_val, y_val_pred, average=average)
+                    model_results[name]["val_recall"] = recall_score(y_val, y_val_pred, average=average)
+                    model_results[name]["val_f1"] = f1_score(y_val, y_val_pred, average=average)
+                    model_results[name]["val_balanced_acc"] = balanced_accuracy_score(y_val, y_val_pred)
+                    model_results[name]["val_auc"] = roc_auc_score(y_val, y_val_proba)
+                    model_results[name]["val_brier_score"] = brier_score_loss(y_val, y_val_proba)
+                    model_results[name]["val_log_loss"] = log_loss(y_val, y_val_proba)
+                    
+                    # 計算驗證集校準圖
+                    val_prob_true, val_prob_pred = calibration_curve(y_val, y_val_proba, n_bins=10)
+                    model_results[name]["val_calibration_slope"] = np.polyfit(val_prob_pred, val_prob_true, 1)[0]
+                    
+                    # 計算驗證集ECE
+                    val_binned = np.digitize(y_val_proba, bins) - 1
+                    val_bin_counts = np.bincount(val_binned, minlength=10)
+                    val_bin_sums = np.bincount(val_binned, weights=y_val_proba, minlength=10)
+                    val_bin_true = np.bincount(val_binned, weights=y_val.astype(float), minlength=10)
+                    
+                    # 避免除以零
+                    val_bin_props = np.zeros(10)
+                    val_mask = val_bin_counts > 0
+                    val_bin_props[val_mask] = val_bin_sums[val_mask] / val_bin_counts[val_mask]
+                    val_bin_true_props = np.zeros(10)
+                    val_bin_true_props[val_mask] = val_bin_true[val_mask] / val_bin_counts[val_mask]
+                    
+                    # 計算ECE
+                    val_weights = val_bin_counts / val_bin_counts.sum()
+                    val_ece = np.sum(val_weights * np.abs(val_bin_props - val_bin_true_props))
+                    model_results[name]["val_ece"] = val_ece
+                    
+                    # 儲存驗證集曲線資料
+                    val_fpr, val_tpr, _ = roc_curve(y_val, y_val_proba)
+                    model_results[name]["val_curve_data"] = {
+                        "roc": {
+                            "fpr": val_fpr,
+                            "tpr": val_tpr
+                        },
+                        "calibration": {
+                            "prob_true": val_prob_true,
+                            "prob_pred": val_prob_pred
+                        },
+                        "y_pred": y_val_proba,
+                        "y_true": y_val
+                    }
+                
+        elif task_type == "prob_classification":  # 回歸分類
             # 回歸評估指標
             model_results[name]["train_mse"] = mean_squared_error(y_train, y_train_pred)
             model_results[name]["train_rmse"] = sqrt(model_results[name]["train_mse"])
@@ -657,6 +886,11 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                 best_threshold = threshold
                 model_results[name]["train_threshold"] = best_threshold
                 y_train_binary = (y_train_pred_scaled >= best_threshold).astype(int)
+                
+                # 計算並記錄指定閾值的F1分數 (新增)
+                train_threshold_f1 = f1_score(y_train, y_train_binary, average=average)
+                model_results[name]["train_threshold_f1"] = train_threshold_f1
+                print(f"{name}使用指定閾值: {threshold:.3f}, F1: {train_threshold_f1:.3f}")
             
             # 計算基於閾值的分類指標
             model_results[name]["train_accuracy"] = accuracy_score(y_train, y_train_binary)
@@ -702,7 +936,7 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
             
             # 儲存曲線資料供視覺化使用
             fpr, tpr, _ = roc_curve(y_train, y_train_pred_scaled)
-            model_results[name]["curve_data"] = {
+            model_results[name]["train_curve_data"] = {
                 "roc": {
                     "fpr": fpr,
                     "tpr": tpr
@@ -715,25 +949,119 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
                     "prob_true": prob_true,
                     "prob_pred": prob_pred
                 },
-                "y_pred": y_train_pred_scaled
+                "y_pred": y_train_pred_scaled,
+                "y_true": y_train
             }
             
-        else:  # regression
-            if name not in model_results:
-                model_results[name] = {}
+            # 如果提供了驗證集，評估驗證集性能
+            if has_validation:
+                y_val_pred = best_model.predict(X_val)
                 
-            model_results[name]["best_params"] = grid.best_params_
-            model_results[name]["train_time"] = time() - start_time
+                # 驗證集回歸評估
+                model_results[name]["val_mse"] = mean_squared_error(y_val, y_val_pred)
+                model_results[name]["val_rmse"] = sqrt(model_results[name]["val_mse"])
+                model_results[name]["val_mae"] = mean_absolute_error(y_val, y_val_pred)
+                model_results[name]["val_r2"] = r2_score(y_val, y_val_pred)
+                
+                # 確保預測值在[0,1]範圍內
+                if np.any((y_val_pred < 0) | (y_val_pred > 1)):
+                    print(f"警告: {name} 在驗證集產生了超出[0,1]範圍的預測值")
+                    y_val_pred_scaled = 1 / (1 + np.exp(-(y_val_pred * 4 - 2)))
+                    print(f"已使用Sigmoid函數重新縮放驗證集預測值到[0,1]範圍")
+                else:
+                    y_val_pred_scaled = y_val_pred
+                
+                # 使用訓練集的最佳閾值或指定閾值
+                used_threshold = model_results[name].get("train_threshold", best_threshold)
+                y_val_binary = (y_val_pred_scaled >= used_threshold).astype(int)
+                
+                # 記錄驗證集閾值評估
+                model_results[name]["val_threshold"] = used_threshold
+                model_results[name]["val_threshold_f1"] = f1_score(y_val, y_val_binary, average=average)
+                
+                # 驗證集分類評估
+                model_results[name]["val_accuracy"] = accuracy_score(y_val, y_val_binary)
+                model_results[name]["val_precision"] = precision_score(y_val, y_val_binary, average=average)
+                model_results[name]["val_recall"] = recall_score(y_val, y_val_binary, average=average)
+                model_results[name]["val_f1"] = f1_score(y_val, y_val_binary, average=average)
+                model_results[name]["val_balanced_acc"] = balanced_accuracy_score(y_val, y_val_binary)
+                
+                # 驗證集概率評估
+                model_results[name]["val_brier_score"] = brier_score_loss(y_val, y_val_pred_scaled)
+                model_results[name]["val_log_loss"] = log_loss(y_val, y_val_pred_scaled)
+                model_results[name]["val_auc_roc"] = roc_auc_score(y_val, y_val_pred_scaled)
+                
+                val_precision, val_recall, _ = precision_recall_curve(y_val, y_val_pred_scaled)
+                model_results[name]["val_auc_pr"] = auc(val_recall, val_precision)
+                
+                # 驗證集校準評估
+                val_prob_true, val_prob_pred = calibration_curve(y_val, y_val_pred_scaled, n_bins=10)
+                model_results[name]["val_calibration_slope"] = np.polyfit(val_prob_pred, val_prob_true, 1)[0]
+                
+                # 驗證集ECE計算
+                val_binned = np.clip(np.digitize(y_val_pred_scaled, bins) - 1, 0, 9)
+                val_bin_counts = np.bincount(val_binned, minlength=10)
+                val_bin_sums = np.bincount(val_binned, weights=y_val_pred_scaled, minlength=10)
+                val_bin_true = np.bincount(val_binned, weights=y_val.astype(float), minlength=10)
+                val_bin_counts = np.bincount(val_binned, minlength=10)
+                val_bin_sums = np.bincount(val_binned, weights=y_val_pred_scaled, minlength=10)
+                val_bin_true = np.bincount(val_binned, weights=y_val.astype(float), minlength=10)
+                
+                val_bin_props = np.zeros(10)
+                val_mask = val_bin_counts > 0
+                val_bin_props[val_mask] = val_bin_sums[val_mask] / val_bin_counts[val_mask]
+                val_bin_true_props = np.zeros(10)
+                val_bin_true_props[val_mask] = val_bin_true[val_mask] / val_bin_counts[val_mask]
+                
+                val_weights = val_bin_counts / val_bin_counts.sum()
+                val_ece = np.sum(val_weights * np.abs(val_bin_props - val_bin_true_props))
+                model_results[name]["val_ece"] = val_ece
+                
+                # 儲存驗證集曲線數據
+                val_fpr, val_tpr, _ = roc_curve(y_val, y_val_pred_scaled)
+                model_results[name]["val_curve_data"] = {
+                    "roc": {
+                        "fpr": val_fpr,
+                        "tpr": val_tpr
+                    },
+                    "pr": {
+                        "precision": val_precision,
+                        "recall": val_recall
+                    },
+                    "calibration": {
+                        "prob_true": val_prob_true,
+                        "prob_pred": val_prob_pred
+                    },
+                    "y_pred": y_val_pred_scaled,
+                    "y_true": y_val
+                }
+            
+        else:  # regression
             model_results[name]["train_mse"] = mean_squared_error(y_train, y_train_pred)
             model_results[name]["train_rmse"] = sqrt(model_results[name]["train_mse"])
             model_results[name]["train_mae"] = mean_absolute_error(y_train, y_train_pred)
             model_results[name]["train_r2"] = r2_score(y_train, y_train_pred)
             
             # 儲存預測資料供視覺化使用
-            model_results[name]["regression_data"] = {
+            model_results[name]["train_regression_data"] = {
                 "y_true": y_train,
                 "y_pred": y_train_pred
             }
+            
+            # 如果提供了驗證集，評估驗證集性能
+            if has_validation:
+                y_val_pred = best_model.predict(X_val)
+                
+                model_results[name]["val_mse"] = mean_squared_error(y_val, y_val_pred)
+                model_results[name]["val_rmse"] = sqrt(model_results[name]["val_mse"])
+                model_results[name]["val_mae"] = mean_absolute_error(y_val, y_val_pred)
+                model_results[name]["val_r2"] = r2_score(y_val, y_val_pred)
+                
+                # 儲存驗證集預測資料供視覺化使用
+                model_results[name]["val_regression_data"] = {
+                    "y_true": y_val,
+                    "y_pred": y_val_pred
+                }
     
     # 創建結果摘要DataFrame
     summary_df = pd.DataFrame(model_results).T
@@ -752,6 +1080,7 @@ def tune_models(models, X_train, y_train, param_grids, task_type="classification
 def find_best_model(results, task_type="classification", metric=None):
     """
     根據指定的評估指標找出最佳模型。
+    優先使用驗證集指標，其次是交叉驗證指標。
     
     Parameters:
     -----------
@@ -770,30 +1099,69 @@ def find_best_model(results, task_type="classification", metric=None):
     str
         最佳模型的名稱
     """
+    # 檢查列名前綴以確定是否有真正的驗證集
+    has_real_validation = any(col.startswith("val_") for col in results.columns)
+    
     # 使用默認指標
     if metric is None:
+        # 選擇指標優先順序：驗證集 > 交叉驗證 > 訓練集
         if task_type == "classification":
-            for m in ["train_f1", "f1", "train_accuracy", "accuracy"]:
-                if m in results.columns:
-                    metric = m
-                    break
+            if has_real_validation:
+                for m in ["val_f1", "val_accuracy", "val_auc"]:
+                    if m in results.columns:
+                        metric = m
+                        break
+            if metric is None:  # 如果沒找到驗證集指標，尋找交叉驗證指標
+                for m in ["cv_f1", "cv_accuracy", "cv_auc"]:
+                    if m in results.columns:
+                        metric = m
+                        break
+            if metric is None:  # 如果沒找到交叉驗證指標，使用訓練集指標
+                for m in ["train_f1", "train_accuracy", "train_auc"]:
+                    if m in results.columns:
+                        metric = m
+                        break
         elif task_type == "prob_classification":
-            for m in ["train_auc_roc", "auc_roc", "train_f1", "f1"]:
-                if m in results.columns:
-                    metric = m
-                    break
-        else:
-            for m in ["train_r2", "r2", "train_mse", "mse"]:
-                if m in results.columns:
-                    metric = m
-                    break
+            if has_real_validation:
+                for m in ["val_auc_roc", "val_f1", "val_accuracy"]:
+                    if m in results.columns:
+                        metric = m
+                        break
+            if metric is None:
+                for m in ["cv_auc_roc", "cv_f1", "cv_accuracy"]:
+                    if m in results.columns:
+                        metric = m
+                        break
+            if metric is None:
+                for m in ["train_auc_roc", "train_f1", "train_accuracy"]:
+                    if m in results.columns:
+                        metric = m
+                        break
+        else:  # 回歸任務
+            if has_real_validation:
+                for m in ["val_r2", "val_rmse", "val_mse"]:
+                    if m in results.columns:
+                        metric = m
+                        break
+            if metric is None:
+                for m in ["cv_r2", "cv_rmse", "cv_mse"]:
+                    if m in results.columns:
+                        metric = m
+                        break
+            if metric is None:
+                for m in ["train_r2", "train_rmse", "train_mse"]:
+                    if m in results.columns:
+                        metric = m
+                        break
     
     if metric not in results.columns:
         print(f"找不到指標 {metric}，可用指標: {results.columns.tolist()}")
         return None
     
-    # 根據指標找出最佳模型
-    if task_type == "regression" and metric in ["train_mse", "train_rmse", "train_mae", "mse", "rmse", "mae"]:
+    # 根據指標特性找出最佳模型
+    lower_is_better = any(name in metric for name in ["mse", "rmse", "mae", "log_loss", "brier_score", "ece"])
+    
+    if lower_is_better:
         # 對於這些指標，越小越好
         best_model = results[metric].idxmin()
         best_score = results.loc[best_model, metric]
@@ -805,3 +1173,5 @@ def find_best_model(results, task_type="classification", metric=None):
         print(f"根據 {metric} 的最佳模型: {best_model} (分數: {best_score:.4f})")
     
     return best_model
+
+

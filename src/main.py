@@ -115,7 +115,8 @@ models = {
 model_result = compare_models(models, x_train, y_train, task_type="prob_classification", threshold=None, save_figures=True)
 
 # 儲存模型比較結果
-model_result.to_csv("data/model_result.csv", encoding="utf-8")
+df_clean = model_result.drop(columns=["cv_curve_data","train_curve_data"])
+df_clean.to_csv("data/model_result.csv", encoding="utf-8")
 
 # 找出分數最高的模型
 find_best_model(model_result, task_type="prob_classification")
