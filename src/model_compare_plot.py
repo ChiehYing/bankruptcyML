@@ -214,21 +214,26 @@ def plot_model_curves(name, model_results, task_type="prob_classification", save
     """
     # 優先檢查是否有驗證集曲線數據，其次檢查訓練集曲線數據
     curve_data = None
+    data_source = None  # 記錄數據來源類型
     
     # 首先檢查驗證集/交叉驗證曲線數據
     if "val_curve_data" in model_results:
         curve_data = model_results["val_curve_data"]
         source_label = "驗證集"
+        data_source = "val"
     elif "cv_curve_data" in model_results:
         curve_data = model_results["cv_curve_data"]
         source_label = "交叉驗證"
+        data_source = "cv"
     # 其次檢查訓練集曲線數據
     elif "train_curve_data" in model_results:
         curve_data = model_results["train_curve_data"]
         source_label = "訓練集"
+        data_source = "train"
     elif "curve_data" in model_results:
         curve_data = model_results["curve_data"]
         source_label = "訓練集"
+        data_source = "train"
     
     if task_type not in ["classification", "prob_classification"] or curve_data is None:
         return  # 只針對有曲線數據的分類模型
@@ -261,12 +266,33 @@ def plot_model_curves(name, model_results, task_type="prob_classification", save
         fpr = curve_data["roc"]["fpr"]
         tpr = curve_data["roc"]["tpr"]
         
-        # 嘗試獲取AUC值
+        # 根據數據來源優先獲取對應的AUC值
         auc_value = 0
-        for key in ["train_auc_roc", "train_auc", "val_auc_roc", "val_auc", "cv_auc_roc", "cv_auc"]:
-            if key in model_results:
-                auc_value = model_results[key]
-                break
+        if data_source == "val":
+            # 驗證集優先順序
+            for key in ["val_auc_roc", "val_auc"]:
+                if key in model_results:
+                    auc_value = model_results[key]
+                    break
+        elif data_source == "cv":
+            # 交叉驗證優先順序
+            for key in ["cv_auc_roc", "cv_auc"]:
+                if key in model_results:
+                    auc_value = model_results[key]
+                    break
+        elif data_source == "train":
+            # 訓練集優先順序
+            for key in ["train_auc_roc", "train_auc"]:
+                if key in model_results:
+                    auc_value = model_results[key]
+                    break
+        
+        # 如果未能找到對應來源的AUC值，則嘗試獲取任何可用的AUC值
+        if auc_value == 0:
+            for key in ["val_auc_roc", "val_auc", "cv_auc_roc", "cv_auc", "train_auc_roc", "train_auc"]:
+                if key in model_results:
+                    auc_value = model_results[key]
+                    break
         
         axes[ax_idx].plot(fpr, tpr, label=f'ROC curve (AUC = {auc_value:.3f})')
         axes[ax_idx].plot([0, 1], [0, 1], 'k--')
@@ -283,12 +309,24 @@ def plot_model_curves(name, model_results, task_type="prob_classification", save
         precision = curve_data["pr"]["precision"]
         recall = curve_data["pr"]["recall"]
         
-        # 嘗試獲取PR AUC值
+        # 根據數據來源優先獲取對應的PR AUC值
         auc_pr_value = 0
-        for key in ["train_auc_pr", "val_auc_pr", "cv_auc_pr"]:
-            if key in model_results:
-                auc_pr_value = model_results[key]
-                break
+        if data_source == "val":
+            if "val_auc_pr" in model_results:
+                auc_pr_value = model_results["val_auc_pr"]
+        elif data_source == "cv":
+            if "cv_auc_pr" in model_results:
+                auc_pr_value = model_results["cv_auc_pr"]
+        elif data_source == "train":
+            if "train_auc_pr" in model_results:
+                auc_pr_value = model_results["train_auc_pr"]
+                
+        # 如果未找到對應來源的PR AUC值，嘗試獲取任何可用的PR AUC值
+        if auc_pr_value == 0:
+            for key in ["val_auc_pr", "cv_auc_pr", "train_auc_pr"]:
+                if key in model_results:
+                    auc_pr_value = model_results[key]
+                    break
         
         axes[ax_idx].plot(recall, precision, label=f'PR curve (AUC = {auc_pr_value:.3f})')
         axes[ax_idx].set_xlim([0.0, 1.0])
@@ -304,12 +342,24 @@ def plot_model_curves(name, model_results, task_type="prob_classification", save
         prob_pred = curve_data["calibration"]["prob_pred"]
         prob_true = curve_data["calibration"]["prob_true"]
         
-        # 嘗試獲取ECE值
+        # 根據數據來源優先獲取對應的ECE值
         ece_value = 0
-        for key in ["train_ece", "val_ece", "cv_ece"]:
-            if key in model_results:
-                ece_value = model_results[key]
-                break
+        if data_source == "val":
+            if "val_ece" in model_results:
+                ece_value = model_results["val_ece"]
+        elif data_source == "cv":
+            if "cv_ece" in model_results:
+                ece_value = model_results["cv_ece"]
+        elif data_source == "train":
+            if "train_ece" in model_results:
+                ece_value = model_results["train_ece"]
+        
+        # 如果未找到對應來源的ECE值，嘗試獲取任何可用的ECE值
+        if ece_value == 0:
+            for key in ["val_ece", "cv_ece", "train_ece"]:
+                if key in model_results:
+                    ece_value = model_results[key]
+                    break
         
         axes[ax_idx].plot(prob_pred, prob_true, marker='o', label='Calibration curve')
         axes[ax_idx].plot([0, 1], [0, 1], 'k--', label='Perfectly calibrated')

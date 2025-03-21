@@ -1,0 +1,24 @@
+,train_mse,train_rmse,train_mae,train_r2,train_threshold,train_threshold_f1,train_accuracy,train_precision,train_recall,train_f1,train_balanced_acc,train_brier_score,train_log_loss,train_auc_roc,train_auc_pr,train_calibration_slope,train_ece,train_curve_data,val_mse,val_rmse,val_mae,val_r2,val_threshold,val_threshold_f1,val_accuracy,val_precision,val_recall,val_f1,val_balanced_acc,val_brier_score,val_log_loss,val_auc_roc,val_auc_pr,val_calibration_slope,val_ece,val_curve_data,train_time
+final_stacking_model,0.04546287809349221,0.21322025723062105,0.04546287809349221,-0.5143720041999968,0.1,0.4959349593495935,0.9545371219065077,0.37770897832817335,0.7218934911242604,0.4959349593495935,0.8419342597505524,0.04546287809349221,1.6386482200735206,0.8419342597505524,0.5541092090616889,0.3685507554131304,0.04546287809349221,"{'roc': {'fpr': array([0.        , 0.03802497, 1.        ]), 'tpr': array([0.        , 0.72189349, 1.        ])}, 'pr': {'precision': array([0.03098075, 0.37770898, 1.        ]), 'recall': array([1.        , 0.72189349, 0.        ])}, 'calibration': {'prob_true': array([0.00915822, 0.37770898]), 'prob_pred': array([0., 1.])}, 'y_pred': array([0, 0, 0, ..., 0, 0, 0]), 'y_true': 0       0
+1       0
+2       0
+3       0
+4       0
+       ..
+5450    0
+5451    0
+5452    0
+5453    0
+5454    0
+Name: Bankrupt?, Length: 5455, dtype: int64}",0.04985337243401759,0.2232786878186487,0.04985337243401759,-0.3851231276973852,0.1,0.5142857142857142,0.9501466275659824,0.4044943820224719,0.7058823529411765,0.5142857142857142,0.8327583889610681,0.04985337243401759,1.796897676290298,0.8327583889610681,0.5606869012061645,0.39272967614011883,0.04985337243401759,"{'roc': {'fpr': array([0.        , 0.04036558, 1.        ]), 'tpr': array([0.        , 0.70588235, 1.        ])}, 'pr': {'precision': array([0.03739003, 0.40449438, 1.        ]), 'recall': array([1.        , 0.70588235, 0.        ])}, 'calibration': {'prob_true': array([0.01176471, 0.40449438]), 'prob_pred': array([0., 1.])}, 'y_pred': array([0, 0, 0, ..., 0, 1, 0]), 'y_true': 0       0
+1       0
+2       0
+3       1
+4       0
+       ..
+1359    0
+1360    0
+1361    0
+1362    0
+1363    0
+Name: Bankrupt?, Length: 1364, dtype: int64}",0.4311482906341553

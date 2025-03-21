@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 
 # 驗證模型並繪製圖表 (主要調用執行的函式)
-def regression_validation(model, X_train, y_train, X_valid=None, y_valid=None, plot_residuals=True):
+def regression_validation(model, X_train, y_train, X_valid=None, y_valid=None, y_train_pred=None, y_valid_pred=None, plot_residuals=True):
     # 計算指標並獲取預測值
-    y_pred_train, y_pred_valid, train_metrics, valid_metrics = model_validation(model, X_train, y_train, X_valid, y_valid)
+    y_pred_train, y_pred_valid, train_metrics, valid_metrics = model_validation(model, X_train, y_train, X_valid, y_valid, y_train_pred, y_valid_pred)
     
     # 繪製散布圖
     scatter_plot(y_train, y_pred_train, y_valid, y_pred_valid)
@@ -22,24 +22,37 @@ def regression_validation(model, X_train, y_train, X_valid=None, y_valid=None, p
         return {"train": train_metrics}
 
 # 驗證模型
-def model_validation(model, X_train, y_train, X_valid=None, y_valid=None):
+def model_validation(model, X_train, y_train, X_valid=None, y_valid=None ,y_train_pred=None, y_valid_pred=None):
     # 訓練集指標
-    y_pred_train = model.predict(X_train)
-    train_metrics = calculate_regression_metrics(y_train, y_pred_train)
+    if y_train_pred is not None:
+        y_pred_train = y_train_pred
+        train_metrics = calculate_regression_metrics(y_train, y_pred_train)
+        
+    else:
+        y_pred_train = model.predict(X_train)
+        train_metrics = calculate_regression_metrics(y_train, y_pred_train)
     
     print("訓練集指標:")
     print_metrics(train_metrics)
     
-    if X_valid is not None and y_valid is not None:
-        # 驗證集指標
-        y_pred_valid = model.predict(X_valid)
+    if y_valid_pred is not None:
+        y_pred_valid = y_valid_pred
         valid_metrics = calculate_regression_metrics(y_valid, y_pred_valid)
         
         print("\n驗證集指標:")
         print_metrics(valid_metrics)
+
     else:
-        y_pred_valid = None
-        valid_metrics = None
+        if X_valid is not None and y_valid is not None:
+            # 驗證集指標
+            y_pred_valid = model.predict(X_valid)
+            valid_metrics = calculate_regression_metrics(y_valid, y_pred_valid)
+            
+            print("\n驗證集指標:")
+            print_metrics(valid_metrics)
+        else:
+            y_pred_valid = None
+            valid_metrics = None
         
     return y_pred_train, y_pred_valid, train_metrics, valid_metrics
 

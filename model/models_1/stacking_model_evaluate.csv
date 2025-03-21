@@ -1,0 +1,24 @@
+,train_mse,train_rmse,train_mae,train_r2,train_threshold,train_threshold_f1,train_accuracy,train_precision,train_recall,train_f1,train_balanced_acc,train_brier_score,train_log_loss,train_auc_roc,train_auc_pr,train_calibration_slope,train_ece,train_curve_data,val_mse,val_rmse,val_mae,val_r2,val_threshold,val_threshold_f1,val_accuracy,val_precision,val_recall,val_f1,val_balanced_acc,val_brier_score,val_log_loss,val_auc_roc,val_auc_pr,val_calibration_slope,val_ece,val_curve_data,train_time
+final_stacking_model,0.005316223648029331,0.07291243822578786,0.005316223648029331,0.8229161769282262,0.1,0.9085173501577287,0.9946837763519707,0.972972972972973,0.8520710059171598,0.9085173501577287,0.9256571450319813,0.005316223648029331,0.1916161225085974,0.9256571450319813,0.9148134651554239,0.9682622135985617,0.005316223648029329,"{'roc': {'fpr': array([0.00000000e+00, 7.56715853e-04, 1.00000000e+00]), 'tpr': array([0.        , 0.85207101, 1.        ])}, 'pr': {'precision': array([0.03098075, 0.97297297, 1.        ]), 'recall': array([1.        , 0.85207101, 0.        ])}, 'calibration': {'prob_true': array([0.00471076, 0.97297297]), 'prob_pred': array([0., 1.])}, 'y_pred': array([0, 0, 0, ..., 0, 0, 0]), 'y_true': 0       0
+1       0
+2       0
+3       0
+4       0
+       ..
+5450    0
+5451    0
+5452    0
+5453    0
+5454    0
+Name: Bankrupt?, Length: 5455, dtype: int64}",0.03372434017595308,0.18364188023420222,0.03372434017595308,0.06300494302823945,0.1,0.54,0.966275659824047,0.5510204081632653,0.5294117647058824,0.54,0.7563281214999328,0.03372434017595308,1.215548428078731,0.7563281214999328,0.5490137403935181,0.5327694575929229,0.033724340175953084,"{'roc': {'fpr': array([0.        , 0.01675552, 1.        ]), 'tpr': array([0.        , 0.52941176, 1.        ])}, 'pr': {'precision': array([0.03739003, 0.55102041, 1.        ]), 'recall': array([1.        , 0.52941176, 0.        ])}, 'calibration': {'prob_true': array([0.01825095, 0.55102041]), 'prob_pred': array([0., 1.])}, 'y_pred': array([0, 0, 0, ..., 0, 1, 0]), 'y_true': 0       0
+1       0
+2       0
+3       1
+4       0
+       ..
+1359    0
+1360    0
+1361    0
+1362    0
+1363    0
+Name: Bankrupt?, Length: 1364, dtype: int64}",0.33979201316833496

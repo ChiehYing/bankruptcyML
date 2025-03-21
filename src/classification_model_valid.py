@@ -6,7 +6,7 @@ import numpy as np
 import seaborn as sns
 
 # 驗證模型並繪製混淆矩陣 (主要調用函數)
-def classification_validation(model, X_train, y_train, X_valid=None, y_valid=None, average="macro"):
+def classification_validation(model, X_train, y_train, X_valid=None, y_valid=None, average="binary"):
     """
     average: Averaging method for multi-class metrics ("macro", "micro", "weighted")
       - "macro": Calculate metrics for each class and take the average (ignores class imbalance)
@@ -46,7 +46,7 @@ def classification_validation(model, X_train, y_train, X_valid=None, y_valid=Non
     plt.show()
 
 # 驗證模型
-def model_validation(model, X_train, y_train, X_valid=None, y_valid=None, average="macro"):
+def model_validation(model, X_train, y_train, X_valid=None, y_valid=None, average="binary"):
 
     # 訓練集評估
     y_pred_train = model.predict(X_train)

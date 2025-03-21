@@ -387,7 +387,11 @@ def compare_models(models, X_train, y_train, X_val=None, y_val=None, task_type="
             
             # 校準評估
             prob_true, prob_pred = calibration_curve(y_train, y_train_pred_scaled, n_bins=10)
-            model_results["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
+            try:
+                model_results["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
+            except np.linalg.LinAlgError:
+                print(f"警告: {name} 模型的校準曲線擬合失敗，將使用預設值1.0")
+                model_results["train_calibration_slope"] = 1.0  # 使用預設值
             
             # 計算期望校準誤差 (Expected Calibration Error)
             bins = np.linspace(0, 1, 11)  # 創建 11 個點，形成 10 個區間
@@ -470,7 +474,11 @@ def compare_models(models, X_train, y_train, X_val=None, y_val=None, task_type="
                 
                 # 驗證集校準評估
                 val_prob_true, val_prob_pred = calibration_curve(y_val, y_val_pred_scaled, n_bins=10)
-                model_results["val_calibration_slope"] = np.polyfit(val_prob_pred, val_prob_true, 1)[0]
+                try:
+                    model_results["val_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
+                except np.linalg.LinAlgError:
+                    print(f"警告: {name} 模型的校準曲線擬合失敗，將使用預設值1.0")
+                    model_results["val_calibration_slope"] = 1.0  # 使用預設值
                 
                 # 驗證集ECE計算
                 val_binned = np.clip(np.digitize(y_val_pred_scaled, bins) - 1, 0, 9)
@@ -555,7 +563,7 @@ def compare_models(models, X_train, y_train, X_val=None, y_val=None, task_type="
 
 
 # 模型參數調優
-def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, task_type="classification", threshold=None, average="binary", cv=5, save_figures=False, figure_dir="picture"):
+def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, task_type="classification", scoring=None, threshold=None, average="binary", cv=5, save_figures=False, figure_dir="picture"):
     """
     使用網格搜索對多個模型進行參數調優，並評估調優後模型的性能。
     若提供驗證集，則使用驗證集評估；否則使用交叉驗證結果作為驗證集。
@@ -579,6 +587,9 @@ def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, t
         - "classification": 標準分類問題評估
         - "regression": 標準回歸問題評估
         - "prob_classification": 使用回歸模型進行概率預測的分類問題評估
+    scoring : str, optional (default=None)
+        網格搜尋時主要評分標準，可自行選值
+        如果為None，則根據任務類型自動選擇
     threshold : float, optional (default=None)
         概率分類任務中，將概率轉換為類別的閾值
         若為None，則會自動尋找最佳閾值（僅適用於prob_classification）
@@ -602,13 +613,16 @@ def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, t
     has_validation = X_val is not None and y_val is not None
     
     # 選擇主要評分標準
-    if task_type == "classification":
-        scoring = "f1_weighted"
-    elif task_type == "prob_classification":
-        # 對於回歸分類，使用不依賴predict_proba的指標
-        scoring = "neg_mean_squared_error"
+    if scoring is None:
+        if task_type == "classification":
+            scoring = "f1_weighted"
+        elif task_type == "prob_classification":
+            # 對於回歸分類，使用不依賴predict_proba的指標
+            scoring = "neg_mean_squared_error"
+        else:
+            scoring = "neg_mean_squared_error"
     else:
-        scoring = "neg_mean_squared_error"
+        scoring = scoring
     
     # 調優結果
     tuned_models = {}
@@ -659,6 +673,12 @@ def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, t
         if not has_validation and task_type == "prob_classification":
             # 獲取交叉驗證預測值
             cv_predictions = cross_val_predict(best_model, X_train, y_train, cv=cv)
+            
+            # 添加交叉驗證回歸指標 - 新增
+            model_results[name]["cv_mse"] = mean_squared_error(y_train, cv_predictions)
+            model_results[name]["cv_rmse"] = sqrt(model_results[name]["cv_mse"])
+            model_results[name]["cv_mae"] = mean_absolute_error(y_train, cv_predictions)
+            model_results[name]["cv_r2"] = r2_score(y_train, cv_predictions)
             
             # 確保預測值在[0,1]範圍內
             if np.any((cv_predictions < 0) | (cv_predictions > 1)):
@@ -913,7 +933,11 @@ def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, t
             
             # 校準評估
             prob_true, prob_pred = calibration_curve(y_train, y_train_pred_scaled, n_bins=10)
-            model_results[name]["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
+            try:
+                model_results[name]["train_calibration_slope"] = np.polyfit(prob_pred, prob_true, 1)[0]
+            except np.linalg.LinAlgError:
+                print(f"警告: {name} 模型的校準曲線擬合失敗，將使用預設值1.0")
+                model_results[name]["train_calibration_slope"] = 1.0  # 使用預設值
             
             # 計算期望校準誤差 (Expected Calibration Error)
             bins = np.linspace(0, 1, 11)  # 創建 11 個點，形成 10 個區間
@@ -996,13 +1020,14 @@ def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, t
                 
                 # 驗證集校準評估
                 val_prob_true, val_prob_pred = calibration_curve(y_val, y_val_pred_scaled, n_bins=10)
-                model_results[name]["val_calibration_slope"] = np.polyfit(val_prob_pred, val_prob_true, 1)[0]
+                try:
+                    model_results[name]["val_calibration_slope"] = np.polyfit(val_prob_pred, val_prob_true, 1)[0]
+                except np.linalg.LinAlgError:
+                    print(f"警告: {name} 模型的校準曲線擬合失敗，將使用預設值1.0")
+                    model_results[name]["val_calibration_slope"] = 1.0  # 使用預設值
                 
                 # 驗證集ECE計算
                 val_binned = np.clip(np.digitize(y_val_pred_scaled, bins) - 1, 0, 9)
-                val_bin_counts = np.bincount(val_binned, minlength=10)
-                val_bin_sums = np.bincount(val_binned, weights=y_val_pred_scaled, minlength=10)
-                val_bin_true = np.bincount(val_binned, weights=y_val.astype(float), minlength=10)
                 val_bin_counts = np.bincount(val_binned, minlength=10)
                 val_bin_sums = np.bincount(val_binned, weights=y_val_pred_scaled, minlength=10)
                 val_bin_true = np.bincount(val_binned, weights=y_val.astype(float), minlength=10)
@@ -1074,7 +1099,6 @@ def tune_models(models, X_train, y_train, param_grids, X_val=None, y_val=None, t
     plot_model_results(summary_df, task_type, is_tuned=True, save_figures=save_figures, figure_dir=figure_dir)
     
     return tuned_models, summary_df
-
 
 # 找出最佳模型
 def find_best_model(results, task_type="classification", metric=None):
